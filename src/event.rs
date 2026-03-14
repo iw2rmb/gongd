@@ -59,15 +59,13 @@ pub async fn translate_event(
     let mut out = Vec::new();
 
     for path in &event.paths {
-        if let Some(repo) = repos.iter().find(|repo| path.starts_with(&repo.root)) {
+        if let Some(repo) = repo_for_path(repos, path) {
             if repo.is_inside_git_dir(path) {
-                if let Some(event) =
-                    translate_git_event(repo, path, &event.kind, deduper.clone()).await
-                {
+                if let Some(event) = translate_git_event(repo, path, &event.kind, &deduper).await {
                     out.push(event);
                 }
             } else if let Some(event) =
-                translate_worktree_event(repo, path, &event.kind, deduper.clone()).await
+                translate_worktree_event(repo, path, &event.kind, &deduper).await
             {
                 out.push(event);
             }
@@ -82,12 +80,9 @@ pub async fn translate_event(
     {
         let from = &event.paths[0];
         let to = &event.paths[1];
-        if let Some(repo) = repos
-            .iter()
-            .find(|repo| from.starts_with(&repo.root) || to.starts_with(&repo.root))
-        {
+        if let Some(repo) = repo_for_paths(repos, from, to) {
             if !repo.is_inside_git_dir(from) && !repo.is_inside_git_dir(to) {
-                if let Some(event) = emit_rename_event(repo, from, to, deduper).await {
+                if let Some(event) = emit_rename_event(repo, from, to, &deduper).await {
                     out.push(event);
                 }
             }
@@ -101,7 +96,7 @@ async fn translate_worktree_event(
     repo: &RepoState,
     path: &Path,
     kind: &EventKind,
-    deduper: SharedDeduper,
+    deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
     let rel = path.strip_prefix(&repo.root).ok()?;
     let path_is_dir = path.is_dir();
@@ -109,56 +104,27 @@ async fn translate_worktree_event(
         return None;
     }
 
-    let event_type = match kind {
-        EventKind::Create(CreateKind::Folder) => EventType::DirCreated,
-        EventKind::Create(_) => EventType::FileCreated,
-        EventKind::Modify(ModifyKind::Data(_))
-        | EventKind::Modify(ModifyKind::Metadata(_))
-        | EventKind::Modify(ModifyKind::Any)
-        | EventKind::Access(_) => {
-            if path_is_dir {
-                EventType::DirCreated
-            } else {
-                EventType::FileModified
-            }
-        }
-        EventKind::Remove(RemoveKind::Folder) => EventType::DirDeleted,
-        EventKind::Remove(_) => {
-            if path_is_dir {
-                EventType::DirDeleted
-            } else {
-                EventType::FileDeleted
-            }
-        }
-        _ => return None,
-    };
+    let event_type = worktree_event_type(kind, path_is_dir)?;
+    let rel_path = rel.to_path_buf();
+    let rel_str = rel.to_string_lossy().into_owned();
 
-    let key = DedupKey {
-        repo: repo.root.clone(),
+    emit_deduped_event(
+        repo,
         event_type,
-        path: Some(rel.to_path_buf()),
-        git_path: None,
-    };
-
-    let mut deduper = deduper.lock().await;
-    if !deduper.should_emit(key) {
-        return None;
-    }
-
-    Some(WireEvent {
-        repo: repo.root.display().to_string(),
-        event_type,
-        path: Some(rel.to_string_lossy().into_owned()),
-        git_path: None,
-        ts_unix_ms: now_ms(),
-    })
+        Some(rel_str),
+        None,
+        Some(rel_path),
+        None,
+        deduper,
+    )
+    .await
 }
 
 async fn emit_rename_event(
     repo: &RepoState,
     from: &Path,
     to: &Path,
-    deduper: SharedDeduper,
+    deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
     let rel_from = from.strip_prefix(&repo.root).ok()?;
     let rel_to = to.strip_prefix(&repo.root).ok()?;
@@ -175,72 +141,47 @@ async fn emit_rename_event(
         EventType::FileRenamed
     };
 
-    let key = DedupKey {
-        repo: repo.root.clone(),
+    emit_deduped_event(
+        repo,
         event_type,
-        path: Some(rel_to.to_path_buf()),
-        git_path: None,
-    };
-
-    let mut deduper = deduper.lock().await;
-    if !deduper.should_emit(key) {
-        return None;
-    }
-
-    Some(WireEvent {
-        repo: repo.root.display().to_string(),
-        event_type,
-        path: Some(format!(
+        Some(format!(
             "{} -> {}",
             rel_from.to_string_lossy(),
             rel_to.to_string_lossy()
         )),
-        git_path: None,
-        ts_unix_ms: now_ms(),
-    })
+        None,
+        Some(rel_to.to_path_buf()),
+        None,
+        deduper,
+    )
+    .await
 }
 
 async fn translate_git_event(
     repo: &RepoState,
     path: &Path,
     kind: &EventKind,
-    deduper: SharedDeduper,
+    deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
     let rel = path.strip_prefix(&repo.git_dir).ok()?;
     let rel_str = rel.to_string_lossy().replace('\\', "/");
-
-    let event_type = match rel_str.as_str() {
-        "HEAD" => EventType::RepoHeadChanged,
-        "index" => EventType::RepoIndexChanged,
-        "packed-refs" => EventType::RepoPackedRefsChanged,
-        value if value.starts_with("refs/") => EventType::RepoRefsChanged,
-        _ => EventType::RepoChanged,
-    };
+    let event_type = git_event_type(&rel_str);
 
     match kind {
         EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {}
         _ => return None,
     }
 
-    let key = DedupKey {
-        repo: repo.root.clone(),
+    emit_deduped_event(
+        repo,
         event_type,
-        path: None,
-        git_path: Some(rel_str.clone()),
-    };
-
-    let mut deduper = deduper.lock().await;
-    if !deduper.should_emit(key) {
-        return None;
-    }
-
-    Some(WireEvent {
-        repo: repo.root.display().to_string(),
-        event_type,
-        path: None,
-        git_path: Some(rel_str),
-        ts_unix_ms: now_ms(),
-    })
+        None,
+        Some(rel_str.clone()),
+        None,
+        Some(rel_str),
+        deduper,
+    )
+    .await
 }
 
 fn now_ms() -> u128 {
@@ -248,4 +189,76 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn repo_for_path<'a>(repos: &'a [RepoState], path: &Path) -> Option<&'a RepoState> {
+    repos.iter().find(|repo| path.starts_with(&repo.root))
+}
+
+fn repo_for_paths<'a>(repos: &'a [RepoState], left: &Path, right: &Path) -> Option<&'a RepoState> {
+    repos
+        .iter()
+        .find(|repo| left.starts_with(&repo.root) || right.starts_with(&repo.root))
+}
+
+fn worktree_event_type(kind: &EventKind, path_is_dir: bool) -> Option<EventType> {
+    match kind {
+        EventKind::Create(CreateKind::Folder) => Some(EventType::DirCreated),
+        EventKind::Create(_) => Some(EventType::FileCreated),
+        EventKind::Modify(ModifyKind::Data(_))
+        | EventKind::Modify(ModifyKind::Metadata(_))
+        | EventKind::Modify(ModifyKind::Any)
+        | EventKind::Access(_) => Some(if path_is_dir {
+            EventType::DirCreated
+        } else {
+            EventType::FileModified
+        }),
+        EventKind::Remove(RemoveKind::Folder) => Some(EventType::DirDeleted),
+        EventKind::Remove(_) => Some(if path_is_dir {
+            EventType::DirDeleted
+        } else {
+            EventType::FileDeleted
+        }),
+        _ => None,
+    }
+}
+
+fn git_event_type(rel_str: &str) -> EventType {
+    match rel_str {
+        "HEAD" => EventType::RepoHeadChanged,
+        "index" => EventType::RepoIndexChanged,
+        "packed-refs" => EventType::RepoPackedRefsChanged,
+        value if value.starts_with("refs/") => EventType::RepoRefsChanged,
+        _ => EventType::RepoChanged,
+    }
+}
+
+async fn emit_deduped_event(
+    repo: &RepoState,
+    event_type: EventType,
+    path: Option<String>,
+    git_path: Option<String>,
+    dedup_path: Option<PathBuf>,
+    dedup_git_path: Option<String>,
+    deduper: &SharedDeduper,
+) -> Option<WireEvent> {
+    let key = DedupKey {
+        repo: repo.root.clone(),
+        event_type,
+        path: dedup_path,
+        git_path: dedup_git_path,
+    };
+
+    let mut deduper = deduper.lock().await;
+    if !deduper.should_emit(key) {
+        return None;
+    }
+
+    Some(WireEvent {
+        repo: repo.root.display().to_string(),
+        event_type,
+        path,
+        git_path,
+        ts_unix_ms: now_ms(),
+    })
 }

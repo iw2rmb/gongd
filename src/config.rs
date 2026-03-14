@@ -38,8 +38,8 @@ impl ConfigStore {
         }
 
         let tmp_path = self.path.with_extension("json.tmp");
-        let raw = serde_json::to_vec_pretty(config)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        let raw =
+            serde_json::to_vec_pretty(config).map_err(|err| io::Error::other(err.to_string()))?;
         fs::write(&tmp_path, raw)?;
         fs::rename(tmp_path, &self.path)?;
         Ok(())

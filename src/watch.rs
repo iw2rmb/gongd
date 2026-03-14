@@ -69,18 +69,11 @@ impl WatchManager {
     }
 
     pub async fn initialize(&mut self) -> io::Result<()> {
-        for repo in build_startup_repos(self.startup_config_inputs.clone()) {
-            self.persisted_roots.insert(repo.root.clone());
-            self.ensure_active(repo)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
-        }
-
-        for repo in build_startup_repos(self.startup_cli_inputs.clone()) {
-            self.cli_roots.insert(repo.root.clone());
-            self.persisted_roots.insert(repo.root.clone());
-            self.ensure_active(repo)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
-        }
+        self.register_startup_repos(
+            self.startup_config_inputs.clone(),
+            StartupRepoSource::Config,
+        )?;
+        self.register_startup_repos(self.startup_cli_inputs.clone(), StartupRepoSource::Cli)?;
 
         self.persist_repo_set(&self.persisted_roots)?;
         self.sync_shared_repos().await;
@@ -191,6 +184,27 @@ impl WatchManager {
         ControlResponse::list(self.watchers.keys().cloned().collect())
     }
 
+    fn register_startup_repos(
+        &mut self,
+        paths: impl IntoIterator<Item = PathBuf>,
+        source: StartupRepoSource,
+    ) -> io::Result<()> {
+        for repo in build_startup_repos(paths) {
+            let root = repo.root.clone();
+            if matches!(source, StartupRepoSource::Cli) {
+                self.cli_roots.insert(root.clone());
+            }
+            self.persisted_roots.insert(root);
+            self.activate_repo(repo)?;
+        }
+        Ok(())
+    }
+
+    fn activate_repo(&mut self, repo: RepoState) -> io::Result<()> {
+        self.ensure_active(repo)
+            .map_err(|err| io::Error::other(err.to_string()))
+    }
+
     fn ensure_active(&mut self, repo: RepoState) -> NotifyResult<()> {
         if self.watchers.contains_key(&repo.root) {
             return Ok(());
@@ -222,6 +236,12 @@ impl WatchManager {
             .collect();
         repos.sort_by(|left, right| left.root.cmp(&right.root));
     }
+}
+
+#[derive(Clone, Copy)]
+enum StartupRepoSource {
+    Config,
+    Cli,
 }
 
 fn start_watcher(repo: RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {

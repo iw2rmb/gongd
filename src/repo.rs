@@ -50,7 +50,7 @@ impl RepoState {
     }
 }
 
-pub fn build_startup_repos(paths: Vec<PathBuf>) -> Vec<RepoState> {
+pub fn build_startup_repos(paths: impl IntoIterator<Item = PathBuf>) -> Vec<RepoState> {
     let mut repos = Vec::new();
     let mut seen = HashSet::new();
 
@@ -90,7 +90,7 @@ fn build_ignore_matcher(root: &Path) -> io::Result<Gitignore> {
 
     builder
         .build()
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))
+        .map_err(|err| io::Error::other(err.to_string()))
 }
 
 fn add_repo_gitignores(root: &Path, builder: &mut GitignoreBuilder) -> io::Result<()> {

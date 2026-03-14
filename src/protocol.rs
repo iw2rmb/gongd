@@ -50,35 +50,38 @@ pub struct ControlResponse {
 }
 
 impl ControlResponse {
-    pub fn success_message(message: impl Into<String>) -> Self {
+    fn new(ok: bool) -> Self {
         Self {
-            ok: true,
-            message: Some(message.into()),
+            ok,
+            message: None,
             error: None,
             repos: None,
         }
     }
 
+    pub fn success_message(message: impl Into<String>) -> Self {
+        Self {
+            message: Some(message.into()),
+            ..Self::new(true)
+        }
+    }
+
     pub fn list(repos: Vec<PathBuf>) -> Self {
         Self {
-            ok: true,
-            message: None,
-            error: None,
             repos: Some(
                 repos
                     .into_iter()
                     .map(|repo| repo.display().to_string())
                     .collect(),
             ),
+            ..Self::new(true)
         }
     }
 
     pub fn error(message: impl Into<String>) -> Self {
         Self {
-            ok: false,
-            message: None,
             error: Some(message.into()),
-            repos: None,
+            ..Self::new(false)
         }
     }
 }

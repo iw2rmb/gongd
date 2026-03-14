@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     io,
     path::{Path, PathBuf},
 };
@@ -29,29 +30,46 @@ pub async fn event_socket_server(
     socket_path: PathBuf,
     tx: broadcast::Sender<String>,
 ) -> io::Result<()> {
-    let listener = UnixListener::bind(&socket_path)?;
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let rx = tx.subscribe();
-        tokio::spawn(async move {
-            if let Err(err) = event_client_writer(stream, rx).await {
-                eprintln!("event client disconnected: {err}");
-            }
-        });
-    }
+    serve_unix_clients(
+        socket_path,
+        tx,
+        |stream, tx| async move { event_client_writer(stream, tx.subscribe()).await },
+        "event client disconnected",
+    )
+    .await
 }
 
 pub async fn control_socket_server(
     socket_path: PathBuf,
     tx: mpsc::Sender<ManagerRequest>,
 ) -> io::Result<()> {
+    serve_unix_clients(
+        socket_path,
+        tx,
+        handle_control_client,
+        "control client disconnected",
+    )
+    .await
+}
+
+async fn serve_unix_clients<T, F, Fut>(
+    socket_path: PathBuf,
+    state: T,
+    handler: F,
+    disconnect_message: &'static str,
+) -> io::Result<()>
+where
+    T: Clone + Send + 'static,
+    F: Fn(UnixStream, T) -> Fut + Copy + Send + 'static,
+    Fut: Future<Output = io::Result<()>> + Send + 'static,
+{
     let listener = UnixListener::bind(&socket_path)?;
     loop {
         let (stream, _) = listener.accept().await?;
-        let tx = tx.clone();
+        let state = state.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_control_client(stream, tx).await {
-                eprintln!("control client disconnected: {err}");
+            if let Err(err) = handler(stream, state).await {
+                eprintln!("{disconnect_message}: {err}");
             }
         });
     }
@@ -121,8 +139,7 @@ where
     W: AsyncWriteExt + Unpin,
     T: Serialize,
 {
-    let mut line = serde_json::to_string(value)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+    let mut line = serde_json::to_string(value).map_err(|err| io::Error::other(err.to_string()))?;
     line.push('\n');
     writer.write_all(line.as_bytes()).await
 }
