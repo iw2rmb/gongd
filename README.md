@@ -11,8 +11,9 @@
 - respects `.git/info/exclude`
 - respects the global Git ignore file when configured via `core.excludesFile`
 - watches one or more repository roots
-- persists the watch set in `~/.gong/config.json`
-- watches `~/.gong/` and reconciles active repo watches from `config.json`
+- watches worktree changes for untracked edits and file creation/deletion
+- watches `.git/` metadata changes for repository transitions
+- reconciles active repos by watching own config file
 - broadcasts events over one Unix socket and accepts control commands over another
 
 
@@ -40,14 +41,6 @@ Changes in `.git/`
 - `.git` must be a directory. Repositories where `.git` is a file that points to another gitdir, such as some worktree setups, are not handled yet.
 - The ignore matcher is built at startup. If ignore files change while the daemon is running, restart the daemon.
 - Rename reporting depends on the backend watcher and platform behavior.
-
-
-## Why this shape
-
-A Git-aware watcher is best modeled as two event streams:
-
-1. worktree changes for untracked edits and file creation/deletion
-2. `.git/` metadata changes for repository transitions
 
 
 ## Install
