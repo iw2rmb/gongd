@@ -29,8 +29,6 @@ Template units are provided in `deploy/`:
 
 #### macOS launchd
 
-Copy the template into `~/Library/LaunchAgents/`, then:
-
 ```bash
 cp deploy/local.gongd.plist ~/Library/LaunchAgents/local.gongd.plist
 launchctl unload ~/Library/LaunchAgents/local.gongd.plist 2>/dev/null || true
@@ -40,8 +38,6 @@ launchctl start local.gongd
 
 
 #### Linux systemd
-
-Copy the template into `~/.config/systemd/user/`, then:
 
 ```bash
 mkdir -p ~/.config/systemd/user
