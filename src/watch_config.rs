@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     io,
     path::{Path, PathBuf},
 };
@@ -9,11 +8,17 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::{ConfigStore, GongdConfig},
-    repo::{build_startup_repos, normalize_repo_root, RepoState},
+    repo::{build_startup_repos, RepoState},
 };
 
-struct LoadedRoots {
-    roots: BTreeSet<PathBuf>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredRepo {
+    pub original: PathBuf,
+    pub resolved: PathBuf,
+}
+
+struct LoadedConfiguredRepos {
+    repos: Vec<ConfiguredRepo>,
     changed: bool,
 }
 
@@ -74,16 +79,16 @@ impl ConfigWatch {
             return Ok(());
         }
 
-        let roots = discover_repo_roots(self.startup_cli_inputs.clone());
-        if roots.is_empty() {
+        let repos = load_configured_repos(self.startup_cli_inputs.clone());
+        if repos.repos.is_empty() {
             return Ok(());
         }
 
-        self.save_roots(&roots)
+        self.save_configured_repos(&repos.repos)
     }
 
     pub fn load_repo_states_for_apply(&self) -> io::Result<Option<Vec<RepoState>>> {
-        let loaded = match self.load_roots_snapshot() {
+        let loaded = match self.load_configured_repos_snapshot() {
             Ok(loaded) => loaded,
             Err(err) if err.kind() == io::ErrorKind::InvalidData => {
                 eprintln!("{err}");
@@ -93,28 +98,31 @@ impl ConfigWatch {
         };
 
         if loaded.changed {
-            self.save_roots(&loaded.roots)?;
+            self.save_configured_repos(&loaded.repos)?;
         }
 
-        Ok(Some(build_startup_repos(loaded.roots)))
+        Ok(Some(build_startup_repos(
+            loaded.repos.into_iter().map(|repo| repo.resolved),
+        )))
     }
 
-    pub fn load_roots_for_write(&self) -> io::Result<BTreeSet<PathBuf>> {
-        let config = self.store.load()?;
-        Ok(load_roots_for_write(config.repos))
+    pub fn load_configured_repos_for_write(&self) -> io::Result<Vec<ConfiguredRepo>> {
+        let loaded = self.load_configured_repos_snapshot()?;
+        if loaded.changed {
+            self.save_configured_repos(&loaded.repos)?;
+        }
+        Ok(loaded.repos)
     }
 
-    pub fn save_roots(&self, roots: &BTreeSet<PathBuf>) -> io::Result<()> {
+    pub fn save_configured_repos(&self, repos: &[ConfiguredRepo]) -> io::Result<()> {
         self.store.save(&GongdConfig {
-            repos: roots.iter().cloned().collect(),
+            repos: repos.iter().map(|repo| repo.original.clone()).collect(),
         })
     }
 
-    fn load_roots_snapshot(&self) -> io::Result<LoadedRoots> {
+    fn load_configured_repos_snapshot(&self) -> io::Result<LoadedConfiguredRepos> {
         let config = self.store.load()?;
-        let roots = discover_repo_roots(config.repos.clone());
-        let changed = roots.iter().cloned().collect::<Vec<_>>() != config.repos;
-        Ok(LoadedRoots { roots, changed })
+        Ok(load_configured_repos(config.repos))
     }
 }
 
@@ -136,16 +144,96 @@ fn start_config_watcher(
     Ok(watcher)
 }
 
-fn discover_repo_roots(paths: Vec<PathBuf>) -> BTreeSet<PathBuf> {
-    build_startup_repos(paths)
-        .into_iter()
-        .map(|repo| repo.root)
-        .collect()
+impl ConfiguredRepo {
+    pub fn from_path(path: &Path) -> io::Result<Self> {
+        let resolved = RepoState::discover(path)?.root;
+        Ok(Self {
+            original: path.to_path_buf(),
+            resolved,
+        })
+    }
 }
 
-fn load_roots_for_write(paths: Vec<PathBuf>) -> BTreeSet<PathBuf> {
-    paths
-        .into_iter()
-        .filter_map(|path| normalize_repo_root(&path).ok())
-        .collect()
+fn load_configured_repos(paths: Vec<PathBuf>) -> LoadedConfiguredRepos {
+    let mut repos = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    for original in &paths {
+        match ConfiguredRepo::from_path(original) {
+            Ok(repo) if !seen.insert(repo.resolved.clone()) => {}
+            Ok(repo) => repos.push(repo),
+            Err(err) => eprintln!("skipping {}: {err}", original.display()),
+        }
+    }
+
+    let changed = repos
+        .iter()
+        .map(|repo| repo.original.clone())
+        .collect::<Vec<_>>()
+        != paths;
+    LoadedConfiguredRepos { repos, changed }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc};
+
+    use tokio::sync::{mpsc, RwLock};
+
+    use super::ConfigWatch;
+    use crate::{
+        config::{ConfigStore, GongdConfig},
+        test_support::{env_lock, init_git_repo, ScopedEnvVar, TestDir},
+        watch::WatchManager,
+    };
+
+    #[tokio::test]
+    async fn config_reload_dedupes_by_resolved_path_and_keeps_first_original() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-config-home");
+        let repo = home.path().join("repo");
+        init_git_repo(&repo);
+        let repo_root = std::fs::canonicalize(&repo).unwrap();
+        let _home = ScopedEnvVar::set("HOME", home.path());
+
+        let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
+        store
+            .save(&GongdConfig {
+                repos: vec![PathBuf::from("~/repo"), repo_root.clone()],
+            })
+            .unwrap();
+
+        let (raw_tx, _raw_rx) = mpsc::channel(16);
+        let repos = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
+
+        manager.initialize().await.unwrap();
+
+        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
+        assert_eq!(
+            repos
+                .read()
+                .await
+                .iter()
+                .map(|repo| repo.root.clone())
+                .collect::<Vec<_>>(),
+            vec![repo_root]
+        );
+    }
+
+    #[test]
+    fn seed_from_cli_keeps_original_paths() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-config-seed-home");
+        let repo = home.path().join("repo");
+        init_git_repo(&repo);
+        let _home = ScopedEnvVar::set("HOME", home.path());
+
+        let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
+        let config_watch = ConfigWatch::new(store.clone(), vec![PathBuf::from("~/repo")]);
+
+        config_watch.seed_from_cli_if_needed().unwrap();
+
+        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
+    }
 }

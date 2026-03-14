@@ -2,6 +2,7 @@ mod app;
 mod args;
 mod config;
 mod event;
+mod paths;
 mod protocol;
 mod repo;
 mod server;

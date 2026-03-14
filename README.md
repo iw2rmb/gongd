@@ -89,11 +89,13 @@ Config format:
 ```json
 {
   "repos": [
-    "/absolute/path/to/repo-a",
-    "/absolute/path/to/repo-b"
+    "~/work/repo-a",
+    "$HOME/work/repo-b"
   ]
 }
 ```
+
+Repo entries accept `~` and environment variables. `gongd` resolves them to absolute repo roots for duplicate detection and active watches, but preserves the first original spelling when it rewrites `config.json`.
 
 ## Service install
 

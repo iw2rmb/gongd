@@ -2,6 +2,8 @@ use std::{env, io, path::PathBuf};
 
 use clap::Parser;
 
+use crate::paths::expand_path;
+
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gongd")]
 #[command(about = "Watch local Git repositories and broadcast filtered events over a Unix socket")]
@@ -28,7 +30,9 @@ pub struct Args {
 
 impl Args {
     pub fn config_path(&self) -> io::Result<PathBuf> {
-        self.config.clone().map_or_else(default_config_path, Ok)
+        self.config
+            .as_deref()
+            .map_or_else(default_config_path, expand_path)
     }
 }
 
@@ -37,4 +41,27 @@ fn default_config_path() -> io::Result<PathBuf> {
         .map(PathBuf::from)
         .map(|home| home.join(".gong").join("config.json"))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
+
+    use super::Args;
+    use crate::test_support::{env_lock, ScopedEnvVar, TestDir};
+
+    #[test]
+    fn config_path_expands_home_prefix() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-args-home");
+        let _home = ScopedEnvVar::set("HOME", home.path());
+        let args = Args::parse_from(["gongd", "--config", "~/.gong/custom.json"]);
+
+        assert_eq!(
+            args.config_path().unwrap(),
+            PathBuf::from(home.path()).join(".gong").join("custom.json")
+        );
+    }
 }

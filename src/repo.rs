@@ -7,6 +7,8 @@ use std::{
 
 use ignore::gitignore::{gitconfig_excludes_path, Gitignore, GitignoreBuilder};
 
+use crate::paths::expand_path;
+
 #[derive(Clone, Debug)]
 pub struct RepoState {
     pub root: PathBuf,
@@ -16,7 +18,8 @@ pub struct RepoState {
 
 impl RepoState {
     pub fn discover(input: &Path) -> io::Result<Self> {
-        let root = fs::canonicalize(input)?;
+        let input = expand_path(input)?;
+        let root = fs::canonicalize(&input)?;
         let git_dir = root.join(".git");
         if !git_dir.exists() {
             return Err(io::Error::new(
@@ -69,10 +72,12 @@ pub fn build_startup_repos(paths: impl IntoIterator<Item = PathBuf>) -> Vec<Repo
 }
 
 pub fn normalize_repo_root(path: &Path) -> io::Result<PathBuf> {
+    let path = expand_path(path)?;
+
     if path.exists() {
         fs::canonicalize(path)
     } else if path.is_absolute() {
-        Ok(path.to_path_buf())
+        Ok(path)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -132,7 +137,7 @@ fn add_global_gitignore(builder: &mut GitignoreBuilder) {
 mod tests {
     use std::path::Path;
 
-    use super::RepoState;
+    use super::{normalize_repo_root, RepoState};
     use crate::test_support::{
         env_lock, init_git_repo, write_file, ScopedCurrentDir, ScopedEnvVar, TestDir,
     };
@@ -199,5 +204,18 @@ mod tests {
         let repo = repo_state(watched.path());
 
         assert!(repo.is_worktree_ignored(Path::new("globally-ignored"), false));
+    }
+
+    #[test]
+    fn normalize_repo_root_expands_home_prefix() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-home");
+        let repo = home.path().join("repo");
+        init_git_repo(&repo);
+        let _home = ScopedEnvVar::set("HOME", home.path());
+
+        let normalized = normalize_repo_root(Path::new("~/repo")).unwrap();
+
+        assert_eq!(normalized, std::fs::canonicalize(repo).unwrap());
     }
 }

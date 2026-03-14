@@ -204,7 +204,10 @@ mod tests {
         assert!(remove.ok);
 
         wait_for_repos(&control_socket, Vec::new()).await;
-        assert_eq!(store.load().unwrap().repos, Vec::<std::path::PathBuf>::new());
+        assert_eq!(
+            store.load().unwrap().repos,
+            Vec::<std::path::PathBuf>::new()
+        );
 
         server_handle.abort();
         manager_handle.abort();

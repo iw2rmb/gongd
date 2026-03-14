@@ -152,8 +152,7 @@ mod tests {
         let (manager_tx, manager_rx) = mpsc::channel(16);
         let manager_handle = tokio::spawn(manager.run(manager_rx));
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![repo_root.clone()]))
-            .await;
+        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![repo.clone()])).await;
         wait_for(|| {
             repos
                 .try_read()

@@ -11,7 +11,7 @@ use crate::{
     config::ConfigStore,
     protocol::ControlResponse,
     repo::{normalize_repo_root, RepoState},
-    watch_config::ConfigWatch,
+    watch_config::{ConfigWatch, ConfiguredRepo},
 };
 
 pub type RawEvent = notify::Result<Event>;
@@ -109,23 +109,34 @@ impl WatchManager {
     }
 
     fn try_add_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
-        let root = RepoState::discover(repo)?.root;
-        let inserted = self.persist_roots(|roots| Ok(roots.insert(root.clone())))?;
+        let repo = ConfiguredRepo::from_path(repo)?;
+        let inserted = self.persist_repos(|repos| {
+            if repos
+                .iter()
+                .any(|existing| existing.resolved == repo.resolved)
+            {
+                Ok(false)
+            } else {
+                repos.push(repo.clone());
+                Ok(true)
+            }
+        })?;
 
         Ok(if inserted {
-            ControlResponse::success_message(format!("watch added for {}", root.display()))
+            ControlResponse::success_message(format!("watch added for {}", repo.resolved.display()))
         } else {
             ControlResponse::success_message(format!(
                 "watch already configured for {}",
-                root.display()
+                repo.resolved.display()
             ))
         })
     }
 
     fn try_remove_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
         let root = normalize_repo_root(repo)?;
-        self.persist_roots(|roots| {
-            if roots.remove(&root) {
+        self.persist_repos(|repos| {
+            if let Some(index) = repos.iter().position(|repo| repo.resolved == root) {
+                repos.remove(index);
                 Ok(())
             } else {
                 Err(io::Error::new(
@@ -141,13 +152,13 @@ impl WatchManager {
         )))
     }
 
-    fn persist_roots<T>(
+    fn persist_repos<T>(
         &self,
-        mutate: impl FnOnce(&mut BTreeSet<PathBuf>) -> io::Result<T>,
+        mutate: impl FnOnce(&mut Vec<ConfiguredRepo>) -> io::Result<T>,
     ) -> io::Result<T> {
-        let mut roots = self.config_watch.load_roots_for_write()?;
-        let result = mutate(&mut roots)?;
-        self.config_watch.save_roots(&roots)?;
+        let mut repos = self.config_watch.load_configured_repos_for_write()?;
+        let result = mutate(&mut repos)?;
+        self.config_watch.save_configured_repos(&repos)?;
         Ok(result)
     }
 
@@ -220,14 +231,14 @@ fn start_repo_watcher(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
     use tokio::sync::{mpsc, oneshot, RwLock};
 
     use super::{ManagerRequest, WatchManager};
     use crate::{
         config::{ConfigStore, GongdConfig},
-        test_support::{init_git_repo, wait_for, TestDir},
+        test_support::{env_lock, init_git_repo, wait_for, ScopedEnvVar, TestDir},
     };
 
     #[tokio::test]
@@ -251,7 +262,7 @@ mod tests {
         let (manager_tx, manager_rx) = mpsc::channel(16);
         let manager_handle = tokio::spawn(manager.run(manager_rx));
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![cli_root.clone()]))
+        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![cli_repo.clone()]))
             .await;
         wait_for(|| {
             repos
@@ -266,7 +277,7 @@ mod tests {
 
         wait_for(|| {
             store.load().ok().map(|config| config.repos)
-                == Some(vec![added_root.clone(), cli_root.clone()])
+                == Some(vec![cli_repo.clone(), added_repo.clone()])
         })
         .await;
         wait_for(|| {
@@ -280,7 +291,7 @@ mod tests {
         let remove_response = send_remove_watch(&manager_tx, cli_repo.clone()).await;
         assert!(remove_response.ok);
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_root.clone()]))
+        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_repo.clone()]))
             .await;
         wait_for(|| {
             repos
@@ -314,7 +325,7 @@ mod tests {
 
         manager.initialize().await.unwrap();
 
-        assert_eq!(store.load().unwrap().repos, vec![present_root.clone()]);
+        assert_eq!(store.load().unwrap().repos, vec![present_repo.clone()]);
         assert_eq!(
             repos
                 .read()
@@ -324,6 +335,61 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![present_root]
         );
+    }
+
+    #[tokio::test]
+    async fn add_watch_dedupes_against_existing_config_by_resolved_path() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-watch-manager-home");
+        let repo = home.path().join("repo");
+        init_git_repo(&repo);
+        let repo_root = std::fs::canonicalize(&repo).unwrap();
+        let _home = ScopedEnvVar::set("HOME", home.path());
+
+        let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
+        store
+            .save(&GongdConfig {
+                repos: vec![PathBuf::from("~/repo")],
+            })
+            .unwrap();
+
+        let (raw_tx, _raw_rx) = mpsc::channel(16);
+        let repos = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(repos, raw_tx, Vec::new(), store.clone());
+        manager.initialize().await.unwrap();
+
+        let response = manager.try_add_watch(&repo_root).unwrap();
+        let expected_message = format!("watch already configured for {}", repo_root.display());
+
+        assert!(response.ok);
+        assert_eq!(response.message.as_deref(), Some(expected_message.as_str()));
+        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
+    }
+
+    #[tokio::test]
+    async fn remove_watch_matches_configured_repo_by_resolved_path() {
+        let _guard = env_lock().lock().unwrap();
+        let home = TestDir::new("gongd-watch-manager-remove-home");
+        let repo = home.path().join("repo");
+        init_git_repo(&repo);
+        let _home = ScopedEnvVar::set("HOME", home.path());
+
+        let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
+        store
+            .save(&GongdConfig {
+                repos: vec![PathBuf::from("~/repo")],
+            })
+            .unwrap();
+
+        let (raw_tx, _raw_rx) = mpsc::channel(16);
+        let repos = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(repos, raw_tx, Vec::new(), store.clone());
+        manager.initialize().await.unwrap();
+
+        let response = manager.try_remove_watch(&repo).unwrap();
+
+        assert!(response.ok);
+        assert_eq!(store.load().unwrap().repos, Vec::<PathBuf>::new());
     }
 
     async fn send_add_watch(

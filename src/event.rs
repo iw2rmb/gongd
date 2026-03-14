@@ -143,8 +143,7 @@ pub async fn translate_event(
         }
     }
 
-    if is_rename_event(event.kind) && event.paths.len() >= 2
-    {
+    if is_rename_event(event.kind) && event.paths.len() >= 2 {
         let from = &event.paths[0];
         let to = &event.paths[1];
         if let Some(repo) = repo_for_paths(repos, from, to) {
@@ -185,8 +184,12 @@ async fn translate_worktree_event(
         return None;
     }
 
-    emit_deduped_event(repo, PendingEvent::worktree(worktree_event_type(kind, entry_kind)?, rel), deduper)
-        .await
+    emit_deduped_event(
+        repo,
+        PendingEvent::worktree(worktree_event_type(kind, entry_kind)?, rel),
+        deduper,
+    )
+    .await
 }
 
 async fn emit_rename_event(
@@ -210,7 +213,12 @@ async fn emit_rename_event(
         EntryKind::File => EventType::FileRenamed,
     };
 
-    emit_deduped_event(repo, PendingEvent::rename(event_type, rel_from, rel_to), deduper).await
+    emit_deduped_event(
+        repo,
+        PendingEvent::rename(event_type, rel_from, rel_to),
+        deduper,
+    )
+    .await
 }
 
 async fn translate_git_event(
