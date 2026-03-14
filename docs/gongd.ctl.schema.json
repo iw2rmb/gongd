@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gongd.ctl.schema.json",
+  "title": "gongd control socket message",
+  "description": "One request or response message sent over the gongd control socket.",
+  "oneOf": [
+    {
+      "title": "add_watch request",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "add_watch"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Absolute or existing repository path.",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "repo"
+      ]
+    },
+    {
+      "title": "remove_watch request",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "remove_watch"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Absolute or existing repository path.",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "repo"
+      ]
+    },
+    {
+      "title": "list_watches request",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "list_watches"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "title": "response",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "ok"
+      ]
+    }
+  ]
+}

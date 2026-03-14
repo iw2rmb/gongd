@@ -1,0 +1,12 @@
+[Unit]
+Description=gongd Git event daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=gongd --socket /tmp/gongd.sock --control-socket /tmp/gongd.ctl.sock
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

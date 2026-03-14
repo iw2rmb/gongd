@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gongd.schema.json",
+  "title": "gongd event stream message",
+  "description": "One newline-delimited JSON event emitted by gongd.",
+  "oneOf": [
+    {
+      "title": "worktree event",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Absolute path to the watched repository root.",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "file_created",
+            "file_modified",
+            "file_deleted",
+            "file_renamed",
+            "dir_created",
+            "dir_deleted",
+            "dir_renamed"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "Path relative to the repository root. Rename events use the current 'from -> to' string payload.",
+          "minLength": 1
+        },
+        "git_path": {
+          "type": "null",
+          "description": "Always null for worktree events."
+        },
+        "ts_unix_ms": {
+          "type": "integer",
+          "description": "Unix timestamp in milliseconds.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repo",
+        "type",
+        "path",
+        "git_path",
+        "ts_unix_ms"
+      ]
+    },
+    {
+      "title": "git metadata event",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Absolute path to the watched repository root.",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "repo_head_changed",
+            "repo_index_changed",
+            "repo_refs_changed",
+            "repo_packed_refs_changed",
+            "repo_changed"
+          ]
+        },
+        "path": {
+          "type": "null",
+          "description": "Always null for .git events."
+        },
+        "git_path": {
+          "type": "string",
+          "description": "Path relative to the repository .git directory.",
+          "minLength": 1
+        },
+        "ts_unix_ms": {
+          "type": "integer",
+          "description": "Unix timestamp in milliseconds.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repo",
+        "type",
+        "path",
+        "git_path",
+        "ts_unix_ms"
+      ]
+    }
+  ]
+}
