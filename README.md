@@ -98,6 +98,8 @@ Check example at [scripts/client.sh](scripts/client.sh).
 
 The control socket is request/response JSON over a separate Unix socket.
 
+Schema: [schemas/gongd.ctl.schema.json](schemas/gongd.ctl.schema.json).
+
 List watches:
 
 ```bash
@@ -118,9 +120,6 @@ printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - 
 
 `add_watch` and `remove_watch` rewrite `~/.gong/config.json`. The config watcher applies the resulting watch-set change.
 
-Schema:
-- [schemas/gongd.ctl.schema.json](schemas/gongd.ctl.schema.json)
-
 
 ## Example output
 
@@ -135,6 +134,8 @@ Schema:
 
 Each connected client receives the same broadcast stream.
 
+Schema: [schemas/gongd.schema.json](schemas/gongd.schema.json).
+
 Transport:
 - Unix domain socket
 - newline-delimited UTF-8 JSON
@@ -143,9 +144,6 @@ Rules:
 - `path` is only for worktree events
 - `git_path` is only for `.git` events
 - all paths are relative to the repository root or `.git/` root respectively
-
-Schema:
-- [schemas/gongd.schema.json](schemas/gongd.schema.json)
 
 
 ## SDKs
