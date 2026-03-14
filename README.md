@@ -101,7 +101,6 @@ Template units are provided in `deploy/`:
 - `deploy/local.gongd.plist` for `launchd`
 
 > They invoke `gongd` directly, so the service environment must have `gongd` on `PATH`. If you install with `cargo install --path .`, ensure `~/.cargo/bin` is visible to `systemd --user` or `launchd`.
-
 > If you want fixed startup repos from the service definition, append them to `ExecStart` or `ProgramArguments`. They seed `~/.gong/config.json` only when the file is missing or empty.
 
 ### macOS launchd
