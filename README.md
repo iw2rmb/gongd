@@ -19,11 +19,9 @@ It watches one or more local Git repositories, filters worktree events using Git
 - watches `~/.gong/` and reconciles active repo watches from `config.json`
 - broadcasts events over one Unix socket and accepts control commands over another
 
-## Current scope
+## Events
 
-This implementation is intentionally small and local-first.
-
-It emits:
+Changes in repo:
 - `file_created`
 - `file_modified`
 - `file_deleted`
@@ -31,6 +29,8 @@ It emits:
 - `dir_created`
 - `dir_deleted`
 - `dir_renamed`
+
+Changes in `.git/`
 - `repo_head_changed`
 - `repo_index_changed`
 - `repo_refs_changed`
@@ -58,17 +58,11 @@ cargo build --release
 
 ## Install
 
-Install the binary into Cargo's user bin directory:
-
 ```bash
 cargo install --path .
 ```
 
-That typically places `gongd` at `~/.cargo/bin/gongd`.
-
 ## Install With Homebrew
-
-Tap this repository, then install the formula:
 
 ```bash
 brew tap iw2rmb/gongd https://github.com/iw2rmb/gongd
@@ -83,16 +77,6 @@ cargo run -- \
   --control-socket /tmp/gongd.ctl.sock \
   /path/to/repo-a \
   /path/to/repo-b
-```
-
-If installed with `cargo install`, run:
-
-```bash
-~/.cargo/bin/gongd \
-  --socket /tmp/gongd.sock \
-  --control-socket /tmp/gongd.ctl.sock \
-  /absolute/path/to/repo-a \
-  /absolute/path/to/repo-b
 ```
 
 Startup repo arguments are optional.
@@ -121,19 +105,13 @@ Template units are provided in `deploy/`:
 - `deploy/gongd.service` for `systemd --user`
 - `deploy/local.gongd.plist` for `launchd`
 
-The templates use:
+> They invoke `gongd` directly, so the service environment must have `gongd` on `PATH`. If you install with `cargo install --path .`, ensure `~/.cargo/bin` is visible to `systemd --user` or `launchd`.
 
-- event socket: `/tmp/gongd.sock`
-- control socket: `/tmp/gongd.ctl.sock`
-- config file: `~/.gong/config.json`
-
-They invoke `gongd` directly, so the service environment must have `gongd` on `PATH`. If you install with `cargo install --path .`, ensure `~/.cargo/bin` is visible to `systemd --user` or `launchd`.
-
-If you want fixed startup repos from the service definition, append them to `ExecStart` or `ProgramArguments`. They seed `~/.gong/config.json` only when the file is missing or empty.
+> If you want fixed startup repos from the service definition, append them to `ExecStart` or `ProgramArguments`. They seed `~/.gong/config.json` only when the file is missing or empty.
 
 ### macOS launchd
 
-Copy the template into `~/Library/LaunchAgents/`, then load it:
+Copy the template into `~/Library/LaunchAgents/`, then:
 
 ```bash
 cp deploy/local.gongd.plist ~/Library/LaunchAgents/local.gongd.plist
@@ -144,7 +122,7 @@ launchctl start local.gongd
 
 ### Linux systemd
 
-Copy the template into `~/.config/systemd/user/`, then enable it:
+Copy the template into `~/.config/systemd/user/`, then:
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -155,27 +133,11 @@ systemctl --user enable --now gongd
 
 ## Read the event stream
 
-With `socat`:
-
-```bash
-socat - UNIX-CONNECT:/tmp/gongd.sock
-```
-
-With `nc` on systems that support Unix sockets:
-
-```bash
-nc -U /tmp/gongd.sock
-```
+Check example at `scripts/client.sh`.
 
 ## Control socket
 
 The control socket is request/response JSON over a separate Unix socket.
-
-Default path:
-
-```text
-/tmp/gongd.ctl.sock
-```
 
 List watches:
 
@@ -197,7 +159,7 @@ printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - 
 
 `add_watch` and `remove_watch` rewrite `~/.gong/config.json`. The config watcher applies the resulting watch-set change.
 
-Machine-readable schema:
+Schema:
 - `schemas/gongd.ctl.schema.json`
 
 ## Example output
@@ -221,7 +183,7 @@ Rules:
 - `git_path` is only for `.git` events
 - all paths are relative to the repository root or `.git/` root respectively
 
-Machine-readable schema:
+Schema:
 - `schemas/gongd.schema.json`
 
 ## SDKs
