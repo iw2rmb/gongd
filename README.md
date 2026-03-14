@@ -52,7 +52,7 @@ A Git-aware watcher is best modeled as two event streams:
 
 ## Install
 
-Please refer to `INSTALL.md`.
+Please refer to [INSTALL.md](INSTALL.md).
 
 
 ## Run
@@ -91,7 +91,7 @@ Repo entries accept `~` and environment variables. `gongd` resolves them to abso
 
 ## Read the event stream
 
-Check example at `scripts/client.sh`.
+Check example at [scripts/client.sh](scripts/client.sh).
 
 
 ## Control socket
@@ -145,10 +145,10 @@ Rules:
 - all paths are relative to the repository root or `.git/` root respectively
 
 Schema:
-- `schemas/gongd.schema.json`
+- [schemas/gongd.schema.json](schemas/gongd.schema.json)
 
 
 ## SDKs
 
-- Go SDK: `sdk/go-gongd`
-- Rust SDK: `sdk/rust-gongd`
+- Go SDK: [sdk/go-gongd](sdk/go-gongd)
+- Rust SDK: [sdk/rust-gongd](sdk/rust-gongd)
