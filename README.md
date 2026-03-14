@@ -45,13 +45,8 @@ It emits:
 
 A Git-aware watcher is best modeled as two event streams:
 
-1. worktree changes
-2. `.git/` metadata changes
-
-Watching only `.git/` misses untracked edits and file creation/deletion.
-Watching only the worktree produces too much noise and misses semantic repository transitions.
-
-This daemon combines both.
+1. worktree changes for untracked edits and file creation/deletion
+2. `.git/` metadata changes for repository transitions
 
 ## Build
 
@@ -201,7 +196,7 @@ printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - 
 `add_watch` and `remove_watch` rewrite `~/.gong/config.json`. The config watcher applies the resulting watch-set change.
 
 Machine-readable schema:
-- `docs/gongd.ctl.schema.json`
+- `schemas/gongd.ctl.schema.json`
 
 ## Example output
 
@@ -225,7 +220,7 @@ Rules:
 - all paths are relative to the repository root or `.git/` root respectively
 
 Machine-readable schema:
-- `docs/gongd.schema.json`
+- `schemas/gongd.schema.json`
 
 ## Suggested next steps
 
@@ -239,56 +234,7 @@ Good follow-ups for a second version:
 - include commit OID / branch name on `HEAD` changes
 - expose a health endpoint
 
-## Design notes
-
-The crate selection is straightforward:
-
-- `notify` for cross-platform FS events
-- `ignore` for Git-style ignore semantics
-- `tokio` for the event and control Unix socket servers
-- `serde` + `serde_json` for the wire format
-
-The daemon keeps watcher instances alive in-process, treats `~/.gong/config.json` as the canonical watch set, watches `~/.gong/` for config changes, fans out events with a `tokio::broadcast` channel, and serializes control requests through a dedicated control task.
-
 ## SDKs
 
 - Go SDK: `sdk/go-gongd`
 - Rust SDK: `sdk/rust-gongd`
-
-## Repository layout
-
-```text
-gongd/
-├── Cargo.toml
-├── README.md
-├── deploy/
-│   ├── gongd.service
-│   └── local.gongd.plist
-├── docs/
-│   ├── gongd.ctl.schema.json
-│   └── gongd.schema.json
-├── scripts/
-│   └── client.sh
-├── sdk/
-│   └── go-gongd/
-│   │   ├── README.md
-│   │   ├── client.go
-│   │   ├── client_test.go
-│   │   └── go.mod
-│   └── rust-gongd/
-│       ├── Cargo.toml
-│       ├── README.md
-│       └── src/
-│           └── lib.rs
-└── src/
-    ├── app.rs
-    ├── args.rs
-    ├── config.rs
-    ├── event.rs
-    ├── lib.rs
-    ├── main.rs
-    ├── protocol.rs
-    ├── repo.rs
-    ├── server.rs
-    └── watch.rs
-```
