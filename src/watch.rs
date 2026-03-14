@@ -8,9 +8,10 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Result as NotifyR
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::{
-    config::{ConfigStore, GongdConfig},
+    config::ConfigStore,
     protocol::ControlResponse,
-    repo::{build_startup_repos, normalize_repo_root, RepoState},
+    repo::{normalize_repo_root, RepoState},
+    watch_config::ConfigWatch,
 };
 
 pub type RawEvent = notify::Result<Event>;
@@ -37,14 +38,9 @@ struct WatchRegistration {
 
 pub struct WatchManager {
     watchers: BTreeMap<PathBuf, WatchRegistration>,
-    cli_roots: BTreeSet<PathBuf>,
-    persisted_roots: BTreeSet<PathBuf>,
-    suppressed_roots: BTreeSet<PathBuf>,
-    startup_cli_inputs: Vec<PathBuf>,
-    startup_config_inputs: Vec<PathBuf>,
     repos: SharedRepos,
     raw_tx: mpsc::Sender<RawEvent>,
-    config_store: ConfigStore,
+    config_watch: ConfigWatch,
 }
 
 impl WatchManager {
@@ -52,37 +48,35 @@ impl WatchManager {
         repos: SharedRepos,
         raw_tx: mpsc::Sender<RawEvent>,
         startup_cli_inputs: Vec<PathBuf>,
-        startup_config_inputs: Vec<PathBuf>,
         config_store: ConfigStore,
     ) -> Self {
+        let config_watch = ConfigWatch::new(config_store, startup_cli_inputs);
         Self {
             watchers: BTreeMap::new(),
-            cli_roots: BTreeSet::new(),
-            persisted_roots: BTreeSet::new(),
-            suppressed_roots: BTreeSet::new(),
-            startup_cli_inputs,
-            startup_config_inputs,
             repos,
             raw_tx,
-            config_store,
+            config_watch,
         }
     }
 
     pub async fn initialize(&mut self) -> io::Result<()> {
-        self.register_startup_repos(
-            self.startup_config_inputs.clone(),
-            StartupRepoSource::Config,
-        )?;
-        self.register_startup_repos(self.startup_cli_inputs.clone(), StartupRepoSource::Cli)?;
-
-        self.persist_repo_set(&self.persisted_roots)?;
-        self.sync_shared_repos().await;
+        self.config_watch.start()?;
+        self.reload_config_from_disk().await?;
+        self.config_watch.seed_from_cli_if_needed()?;
         Ok(())
     }
 
     pub async fn run(mut self, mut rx: mpsc::Receiver<ManagerRequest>) {
-        while let Some(request) = rx.recv().await {
-            self.handle_request(request).await;
+        loop {
+            tokio::select! {
+                Some(request) = rx.recv() => self.handle_request(request).await,
+                Some(()) = self.config_watch.recv() => {
+                    if let Err(err) = self.reload_config_from_disk().await {
+                        eprintln!("config reload failed: {err}");
+                    }
+                }
+                else => return,
+            }
         }
     }
 
@@ -106,40 +100,21 @@ impl WatchManager {
             Err(err) => return ControlResponse::error(err.to_string()),
         };
         let root = repo.root.clone();
-        let was_active = self.watchers.contains_key(&root);
-        let was_suppressed = self.suppressed_roots.contains(&root);
 
-        if !was_active {
-            if let Err(err) = self.ensure_active(repo) {
-                return ControlResponse::error(err.to_string());
-            }
-        }
+        let mut next_roots = match self.config_watch.load_roots_for_write() {
+            Ok(roots) => roots,
+            Err(err) => return ControlResponse::error(err.to_string()),
+        };
+        let inserted = next_roots.insert(root.clone());
 
-        let mut next_persisted = self.persisted_roots.clone();
-        let added_to_config = next_persisted.insert(root.clone());
-        if let Err(err) = self.persist_repo_set(&next_persisted) {
-            if !was_active {
-                self.watchers.remove(&root);
-                self.sync_shared_repos().await;
-            }
+        if let Err(err) = self.config_watch.save_roots(&next_roots) {
             return ControlResponse::error(err.to_string());
         }
 
-        self.persisted_roots = next_persisted;
-        self.suppressed_roots.remove(&root);
-        self.sync_shared_repos().await;
-
-        if !was_active {
+        if inserted {
             ControlResponse::success_message(format!("watch added for {}", root.display()))
-        } else if was_suppressed {
-            ControlResponse::success_message(format!("watch re-enabled for {}", root.display()))
-        } else if added_to_config {
-            ControlResponse::success_message(format!(
-                "watch already active; persisted {}",
-                root.display()
-            ))
         } else {
-            ControlResponse::success_message(format!("watch already active for {}", root.display()))
+            ControlResponse::success_message(format!("watch already configured for {}", root.display()))
         }
     }
 
@@ -149,60 +124,49 @@ impl WatchManager {
             Err(err) => return ControlResponse::error(err.to_string()),
         };
 
-        let was_active = self.watchers.contains_key(&root);
-        let was_persisted = self.persisted_roots.contains(&root);
-        let was_cli = self.cli_roots.contains(&root);
+        let mut next_roots = match self.config_watch.load_roots_for_write() {
+            Ok(roots) => roots,
+            Err(err) => return ControlResponse::error(err.to_string()),
+        };
 
-        if !was_active && !was_persisted && !was_cli {
+        if !next_roots.remove(&root) {
             return ControlResponse::error(format!("watch not found for {}", root.display()));
         }
 
-        if was_persisted {
-            let mut next_persisted = self.persisted_roots.clone();
-            next_persisted.remove(&root);
-            if let Err(err) = self.persist_repo_set(&next_persisted) {
-                return ControlResponse::error(err.to_string());
-            }
-            self.persisted_roots = next_persisted;
+        if let Err(err) = self.config_watch.save_roots(&next_roots) {
+            return ControlResponse::error(err.to_string());
         }
 
-        self.suppressed_roots.insert(root.clone());
-        self.watchers.remove(&root);
-        self.sync_shared_repos().await;
-
-        if was_cli {
-            ControlResponse::success_message(format!(
-                "watch removed for {}; it will return if the daemon restarts with the same CLI repo list",
-                root.display()
-            ))
-        } else {
-            ControlResponse::success_message(format!("watch removed for {}", root.display()))
-        }
+        ControlResponse::success_message(format!("watch removed for {}", root.display()))
     }
 
     fn list_watches(&self) -> ControlResponse {
         ControlResponse::list(self.watchers.keys().cloned().collect())
     }
 
-    fn register_startup_repos(
-        &mut self,
-        paths: impl IntoIterator<Item = PathBuf>,
-        source: StartupRepoSource,
-    ) -> io::Result<()> {
-        for repo in build_startup_repos(paths) {
-            let root = repo.root.clone();
-            if matches!(source, StartupRepoSource::Cli) {
-                self.cli_roots.insert(root.clone());
-            }
-            self.persisted_roots.insert(root);
-            self.activate_repo(repo)?;
-        }
+    async fn reload_config_from_disk(&mut self) -> io::Result<()> {
+        let Some(repos) = self.config_watch.load_repo_states_for_apply()? else {
+            return Ok(());
+        };
+
+        self.reconcile_watches(repos).await;
         Ok(())
     }
 
-    fn activate_repo(&mut self, repo: RepoState) -> io::Result<()> {
-        self.ensure_active(repo)
-            .map_err(|err| io::Error::other(err.to_string()))
+    async fn reconcile_watches(&mut self, desired_repos: Vec<RepoState>) {
+        let desired_roots: BTreeSet<PathBuf> =
+            desired_repos.iter().map(|repo| repo.root.clone()).collect();
+
+        self.watchers
+            .retain(|root, _| desired_roots.contains(root));
+
+        for repo in desired_repos {
+            if let Err(err) = self.ensure_active(repo.clone()) {
+                eprintln!("failed to watch {}: {err}", repo.root.display());
+            }
+        }
+
+        self.sync_shared_repos().await;
     }
 
     fn ensure_active(&mut self, repo: RepoState) -> NotifyResult<()> {
@@ -210,7 +174,7 @@ impl WatchManager {
             return Ok(());
         }
 
-        let watcher = start_watcher(repo.clone(), self.raw_tx.clone())?;
+        let watcher = start_repo_watcher(repo.clone(), self.raw_tx.clone())?;
         self.watchers.insert(
             repo.root.clone(),
             WatchRegistration {
@@ -219,12 +183,6 @@ impl WatchManager {
             },
         );
         Ok(())
-    }
-
-    fn persist_repo_set(&self, repos: &BTreeSet<PathBuf>) -> io::Result<()> {
-        self.config_store.save(&GongdConfig {
-            repos: repos.iter().cloned().collect(),
-        })
     }
 
     async fn sync_shared_repos(&self) {
@@ -238,13 +196,7 @@ impl WatchManager {
     }
 }
 
-#[derive(Clone, Copy)]
-enum StartupRepoSource {
-    Config,
-    Cli,
-}
-
-fn start_watcher(repo: RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {
+fn start_repo_watcher(repo: RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
         move |event| {
             let _ = tx.blocking_send(event);
@@ -261,16 +213,16 @@ fn start_watcher(repo: RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<Re
 mod tests {
     use std::sync::Arc;
 
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{mpsc, oneshot, RwLock};
 
-    use super::WatchManager;
+    use super::{ManagerRequest, WatchManager};
     use crate::{
         config::ConfigStore,
-        test_support::{init_git_repo, TestDir},
+        test_support::{init_git_repo, wait_for, TestDir},
     };
 
     #[tokio::test]
-    async fn add_watch_persists_repo_and_remove_watch_disables_cli_watch() {
+    async fn startup_seed_and_control_requests_flow_through_config_reload() {
         let tmp = TestDir::new("gongd-watch-manager");
         let cli_repo = tmp.path().join("cli");
         let added_repo = tmp.path().join("added");
@@ -281,28 +233,72 @@ mod tests {
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
         let repos = Arc::new(RwLock::new(Vec::new()));
-        let store = ConfigStore::new(tmp.path().join("gongd.json"));
+        let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
 
-        let mut manager = WatchManager::new(
-            repos.clone(),
-            raw_tx,
-            vec![cli_repo.clone()],
-            Vec::new(),
-            store.clone(),
-        );
+        let mut manager = WatchManager::new(repos.clone(), raw_tx, vec![cli_repo.clone()], store.clone());
         manager.initialize().await.unwrap();
-        assert_eq!(store.load().unwrap().repos, vec![cli_root.clone()]);
 
-        let add_response = manager.add_watch(added_repo.clone()).await;
+        let (manager_tx, manager_rx) = mpsc::channel(16);
+        let manager_handle = tokio::spawn(manager.run(manager_rx));
+
+        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![cli_root.clone()]))
+            .await;
+        wait_for(|| {
+            repos.try_read()
+                .map(|repos| repos.iter().any(|repo| repo.root == cli_root))
+                .unwrap_or(false)
+        })
+        .await;
+
+        let add_response = send_add_watch(&manager_tx, added_repo.clone()).await;
         assert!(add_response.ok);
-        assert_eq!(
-            store.load().unwrap().repos,
-            vec![added_root.clone(), cli_root.clone()]
-        );
 
-        let remove_response = manager.remove_watch(cli_repo.clone()).await;
+        wait_for(|| {
+            store.load().ok().map(|config| config.repos)
+                == Some(vec![added_root.clone(), cli_root.clone()])
+        })
+        .await;
+        wait_for(|| {
+            repos.try_read()
+                .map(|repos| repos.iter().any(|repo| repo.root == added_root))
+                .unwrap_or(false)
+        })
+        .await;
+
+        let remove_response = send_remove_watch(&manager_tx, cli_repo.clone()).await;
         assert!(remove_response.ok);
-        assert!(repos.read().await.iter().all(|repo| repo.root != cli_root));
-        assert_eq!(store.load().unwrap().repos, vec![added_root]);
+
+        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_root.clone()]))
+            .await;
+        wait_for(|| {
+            repos.try_read()
+                .map(|repos| repos.iter().all(|repo| repo.root != cli_root))
+                .unwrap_or(false)
+        })
+        .await;
+
+        manager_handle.abort();
+    }
+
+    async fn send_add_watch(
+        tx: &mpsc::Sender<ManagerRequest>,
+        repo: std::path::PathBuf,
+    ) -> crate::protocol::ControlResponse {
+        let (respond_to, response_rx) = oneshot::channel();
+        let request = ManagerRequest::AddWatch { repo, respond_to };
+
+        tx.send(request).await.unwrap();
+        response_rx.await.unwrap()
+    }
+
+    async fn send_remove_watch(
+        tx: &mpsc::Sender<ManagerRequest>,
+        repo: std::path::PathBuf,
+    ) -> crate::protocol::ControlResponse {
+        let (respond_to, response_rx) = oneshot::channel();
+        let request = ManagerRequest::RemoveWatch { repo, respond_to };
+
+        tx.send(request).await.unwrap();
+        response_rx.await.unwrap()
     }
 }

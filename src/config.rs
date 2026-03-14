@@ -1,4 +1,7 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::PathBuf,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +46,17 @@ impl ConfigStore {
         fs::write(&tmp_path, raw)?;
         fs::rename(tmp_path, &self.path)?;
         Ok(())
+    }
+
+    pub fn exists(&self) -> bool {
+        self.path.exists()
+    }
+
+    pub fn watch_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 }
 

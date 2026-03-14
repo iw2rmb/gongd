@@ -97,3 +97,14 @@ pub fn init_git_repo(path: &Path) {
         .unwrap();
     assert!(status.success());
 }
+
+pub async fn wait_for(mut check: impl FnMut() -> bool) {
+    for _ in 0..100 {
+        if check() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    panic!("condition not met");
+}

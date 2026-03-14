@@ -10,8 +10,8 @@ It watches one or more local Git repositories, filters worktree events using Git
 - respects `.git/info/exclude`
 - respects the global Git ignore file when configured via `core.excludesFile`
 - watches one or more repository roots
-- persists the watch set in `~/.gongd.json`
-- merges startup repos with the persisted config on every start
+- persists the watch set in `~/.gong/config.json`
+- watches `~/.gong/` and reconciles active repo watches from `config.json`
 - broadcasts events over one Unix socket and accepts control commands over another
 
 ## Current scope
@@ -88,7 +88,11 @@ If installed with `cargo install`, run:
 
 Startup repo arguments are optional.
 
-If `~/.gongd.json` exists, its repos are merged with the repos passed on startup. The merged set is then written back to `~/.gongd.json` immediately.
+`~/.gong/config.json` is authoritative. On startup, `gongd` loads it, watches `~/.gong/`, and reconciles the active repo watch set whenever `config.json` changes.
+
+Startup repo arguments are only used to seed `~/.gong/config.json` when the file is missing or its `repos` array is empty.
+
+If `config.json` is deleted, `gongd` stops all repo watches. If the file contains invalid JSON, `gongd` ignores that update and keeps the current active watch set.
 
 Config format:
 
@@ -112,11 +116,11 @@ The templates use:
 
 - event socket: `/tmp/gongd.sock`
 - control socket: `/tmp/gongd.ctl.sock`
-- config file: `~/.gongd.json`
+- config file: `~/.gong/config.json`
 
 They invoke `gongd` directly, so the service environment must have `gongd` on `PATH`. If you install with `cargo install --path .`, ensure `~/.cargo/bin` is visible to `systemd --user` or `launchd`.
 
-If you want fixed startup repos from the service definition, append them to `ExecStart` or `ProgramArguments`. Those startup repos are merged into `~/.gongd.json` on launch.
+If you want fixed startup repos from the service definition, append them to `ExecStart` or `ProgramArguments`. They seed `~/.gong/config.json` only when the file is missing or empty.
 
 ### macOS launchd
 
@@ -182,7 +186,7 @@ Remove a watch:
 printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - UNIX-CONNECT:/tmp/gongd.ctl.sock
 ```
 
-`add_watch` and `remove_watch` update both the active watch set and `~/.gongd.json`.
+`add_watch` and `remove_watch` rewrite `~/.gong/config.json`. The config watcher applies the resulting watch-set change.
 
 Machine-readable schema:
 - `docs/gongd.ctl.schema.json`
@@ -232,7 +236,7 @@ The crate selection is straightforward:
 - `tokio` for the event and control Unix socket servers
 - `serde` + `serde_json` for the wire format
 
-The daemon keeps watcher instances alive in-process, persists the canonical watch set in `~/.gongd.json`, fans out events with a `tokio::broadcast` channel, and serializes dynamic watch changes through a dedicated control task.
+The daemon keeps watcher instances alive in-process, treats `~/.gong/config.json` as the canonical watch set, watches `~/.gong/` for config changes, fans out events with a `tokio::broadcast` channel, and serializes control requests through a dedicated control task.
 
 ## SDKs
 

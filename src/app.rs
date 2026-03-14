@@ -19,7 +19,6 @@ pub async fn run(args: Args) -> io::Result<()> {
     }
 
     let config_store = ConfigStore::new(args.config_path()?);
-    let config = config_store.load()?;
 
     prepare_socket_path(&args.socket)?;
     prepare_socket_path(&args.control_socket)?;
@@ -36,7 +35,6 @@ pub async fn run(args: Args) -> io::Result<()> {
         repos.clone(),
         raw_tx,
         args.repos,
-        config.repos,
         config_store,
     );
     manager.initialize().await?;

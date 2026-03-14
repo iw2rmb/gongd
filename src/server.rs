@@ -177,9 +177,8 @@ mod tests {
 
         let (raw_tx, _raw_rx) = mpsc::channel(32);
         let repos = Arc::new(RwLock::new(Vec::new()));
-        let store = ConfigStore::new(tmp.path().join("gongd.json"));
-        let mut manager =
-            WatchManager::new(repos.clone(), raw_tx, Vec::new(), Vec::new(), store.clone());
+        let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
+        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
         manager.initialize().await.unwrap();
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
@@ -195,8 +194,7 @@ mod tests {
         .await;
         assert!(add.ok);
 
-        let list = send_request(&control_socket, r#"{"op":"list_watches"}"#).await;
-        assert_eq!(list.repos, Some(vec![repo_root.display().to_string()]));
+        wait_for_repos(&control_socket, vec![repo_root.display().to_string()]).await;
 
         let remove = send_request(
             &control_socket,
@@ -205,12 +203,8 @@ mod tests {
         .await;
         assert!(remove.ok);
 
-        let list_after_remove = send_request(&control_socket, r#"{"op":"list_watches"}"#).await;
-        assert_eq!(list_after_remove.repos, Some(Vec::new()));
-        assert_eq!(
-            store.load().unwrap().repos,
-            Vec::<std::path::PathBuf>::new()
-        );
+        wait_for_repos(&control_socket, Vec::new()).await;
+        assert_eq!(store.load().unwrap().repos, Vec::<std::path::PathBuf>::new());
 
         server_handle.abort();
         manager_handle.abort();
@@ -272,5 +266,17 @@ mod tests {
         let mut line = String::new();
         reader.read_line(&mut line).await.unwrap();
         serde_json::from_str(line.trim()).unwrap()
+    }
+
+    async fn wait_for_repos(socket: &Path, expected: Vec<String>) {
+        for _ in 0..100 {
+            let response = send_request(socket, r#"{"op":"list_watches"}"#).await;
+            if response.repos == Some(expected.clone()) {
+                return;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("watch list did not converge");
     }
 }

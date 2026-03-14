@@ -14,7 +14,7 @@ pub struct Args {
     #[arg(long, default_value = "/tmp/gongd.ctl.sock")]
     pub control_socket: PathBuf,
 
-    /// Config file path. Defaults to ~/.gongd.json.
+    /// Config file path. Defaults to ~/.gong/config.json.
     #[arg(long)]
     pub config: Option<PathBuf>,
 
@@ -35,6 +35,6 @@ impl Args {
 fn default_config_path() -> io::Result<PathBuf> {
     env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|home| home.join(".gongd.json"))
+        .map(|home| home.join(".gong").join("config.json"))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))
 }

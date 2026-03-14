@@ -6,6 +6,7 @@ mod protocol;
 mod repo;
 mod server;
 mod watch;
+mod watch_config;
 
 #[cfg(test)]
 mod test_support;
