@@ -1,3 +1,5 @@
+[![Rust](https://github.com/iw2rmb/gongd/actions/workflows/rust.yml/badge.svg)](https://github.com/iw2rmb/gongd/actions/workflows/rust.yml)
+
 # gongd
 
 `gongd` (git + pong + daemon) is a small Unix-socket daemon for local development tooling.
