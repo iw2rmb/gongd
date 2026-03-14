@@ -2,12 +2,7 @@
 
 # gongd
 
-`gongd` (git + pong + daemon) is a small Unix-socket daemon for local development tooling.
-
-Current release: `0.1.0`.
-Versioning follows SemVer.
-
-It watches one or more local Git repositories, filters worktree events using Git-compatible ignore rules, watches `.git/` for repository state changes, and broadcasts newline-delimited JSON events to every connected Unix-socket client.
+`gongd` (git + pong + daemon) is a small Unix-socket daemon for watching git-managed repos and broadcasting events to subscribers like tooling, IDE, LSP.
 
 ## What it does
 
