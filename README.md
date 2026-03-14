@@ -80,6 +80,8 @@ Startup repo arguments are optional.
 
 Startup repo arguments are only used to seed `~/.gong/config.json` when the file is missing or its `repos` array is empty.
 
+If a configured repo disappears from disk or stops being a valid repo, `gongd` prunes that path from `config.json` and stops watching it.
+
 If `config.json` is deleted, `gongd` stops all repo watches. If the file contains invalid JSON, `gongd` ignores that update and keeps the current active watch set.
 
 Config format:

@@ -9,8 +9,13 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::{ConfigStore, GongdConfig},
-    repo::{build_startup_repos, RepoState},
+    repo::{build_startup_repos, normalize_repo_root, RepoState},
 };
+
+struct LoadedRoots {
+    roots: BTreeSet<PathBuf>,
+    changed: bool,
+}
 
 pub struct ConfigWatch {
     startup_cli_inputs: Vec<PathBuf>,
@@ -38,8 +43,8 @@ impl ConfigWatch {
         std::fs::create_dir_all(&watch_dir)?;
 
         let (tx, rx) = mpsc::unbounded_channel();
-        let watcher =
-            start_config_watcher(&watch_dir, tx).map_err(|err| io::Error::other(err.to_string()))?;
+        let watcher = start_config_watcher(&watch_dir, tx)
+            .map_err(|err| io::Error::other(err.to_string()))?;
 
         self.rx = Some(rx);
         self.watcher = Some(watcher);
@@ -78,8 +83,8 @@ impl ConfigWatch {
     }
 
     pub fn load_repo_states_for_apply(&self) -> io::Result<Option<Vec<RepoState>>> {
-        let config = match self.store.load() {
-            Ok(config) => config,
+        let loaded = match self.load_roots_snapshot() {
+            Ok(loaded) => loaded,
             Err(err) if err.kind() == io::ErrorKind::InvalidData => {
                 eprintln!("{err}");
                 return Ok(None);
@@ -87,18 +92,29 @@ impl ConfigWatch {
             Err(err) => return Err(err),
         };
 
-        Ok(Some(build_startup_repos(config.repos)))
+        if loaded.changed {
+            self.save_roots(&loaded.roots)?;
+        }
+
+        Ok(Some(build_startup_repos(loaded.roots)))
     }
 
     pub fn load_roots_for_write(&self) -> io::Result<BTreeSet<PathBuf>> {
         let config = self.store.load()?;
-        Ok(discover_repo_roots(config.repos))
+        Ok(load_roots_for_write(config.repos))
     }
 
     pub fn save_roots(&self, roots: &BTreeSet<PathBuf>) -> io::Result<()> {
         self.store.save(&GongdConfig {
             repos: roots.iter().cloned().collect(),
         })
+    }
+
+    fn load_roots_snapshot(&self) -> io::Result<LoadedRoots> {
+        let config = self.store.load()?;
+        let roots = discover_repo_roots(config.repos.clone());
+        let changed = roots.iter().cloned().collect::<Vec<_>>() != config.repos;
+        Ok(LoadedRoots { roots, changed })
     }
 }
 
@@ -124,5 +140,12 @@ fn discover_repo_roots(paths: Vec<PathBuf>) -> BTreeSet<PathBuf> {
     build_startup_repos(paths)
         .into_iter()
         .map(|repo| repo.root)
+        .collect()
+}
+
+fn load_roots_for_write(paths: Vec<PathBuf>) -> BTreeSet<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|path| normalize_repo_root(&path).ok())
         .collect()
 }

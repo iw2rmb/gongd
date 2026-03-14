@@ -115,7 +115,10 @@ impl WatchManager {
         Ok(if inserted {
             ControlResponse::success_message(format!("watch added for {}", root.display()))
         } else {
-            ControlResponse::success_message(format!("watch already configured for {}", root.display()))
+            ControlResponse::success_message(format!(
+                "watch already configured for {}",
+                root.display()
+            ))
         })
     }
 
@@ -161,8 +164,7 @@ impl WatchManager {
         let desired_roots: BTreeSet<PathBuf> =
             desired_repos.iter().map(|repo| repo.root.clone()).collect();
 
-        self.watchers
-            .retain(|root, _| desired_roots.contains(root));
+        self.watchers.retain(|root, _| desired_roots.contains(root));
 
         for repo in desired_repos {
             if let Err(err) = self.ensure_active(repo.clone()) {
@@ -200,7 +202,10 @@ impl WatchManager {
     }
 }
 
-fn start_repo_watcher(repo: &RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {
+fn start_repo_watcher(
+    repo: &RepoState,
+    tx: mpsc::Sender<RawEvent>,
+) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
         move |event| {
             let _ = tx.blocking_send(event);
@@ -221,7 +226,7 @@ mod tests {
 
     use super::{ManagerRequest, WatchManager};
     use crate::{
-        config::ConfigStore,
+        config::{ConfigStore, GongdConfig},
         test_support::{init_git_repo, wait_for, TestDir},
     };
 
@@ -239,7 +244,8 @@ mod tests {
         let repos = Arc::new(RwLock::new(Vec::new()));
         let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
 
-        let mut manager = WatchManager::new(repos.clone(), raw_tx, vec![cli_repo.clone()], store.clone());
+        let mut manager =
+            WatchManager::new(repos.clone(), raw_tx, vec![cli_repo.clone()], store.clone());
         manager.initialize().await.unwrap();
 
         let (manager_tx, manager_rx) = mpsc::channel(16);
@@ -248,7 +254,8 @@ mod tests {
         wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![cli_root.clone()]))
             .await;
         wait_for(|| {
-            repos.try_read()
+            repos
+                .try_read()
                 .map(|repos| repos.iter().any(|repo| repo.root == cli_root))
                 .unwrap_or(false)
         })
@@ -263,7 +270,8 @@ mod tests {
         })
         .await;
         wait_for(|| {
-            repos.try_read()
+            repos
+                .try_read()
                 .map(|repos| repos.iter().any(|repo| repo.root == added_root))
                 .unwrap_or(false)
         })
@@ -275,13 +283,47 @@ mod tests {
         wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_root.clone()]))
             .await;
         wait_for(|| {
-            repos.try_read()
+            repos
+                .try_read()
                 .map(|repos| repos.iter().all(|repo| repo.root != cli_root))
                 .unwrap_or(false)
         })
         .await;
 
         manager_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn initialize_prunes_missing_repos_from_config() {
+        let tmp = TestDir::new("gongd-watch-manager-prune");
+        let present_repo = tmp.path().join("present");
+        let missing_repo = tmp.path().join("missing");
+        init_git_repo(&present_repo);
+        let present_root = std::fs::canonicalize(&present_repo).unwrap();
+
+        let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
+        store
+            .save(&GongdConfig {
+                repos: vec![missing_repo, present_repo.clone()],
+            })
+            .unwrap();
+
+        let (raw_tx, _raw_rx) = mpsc::channel(16);
+        let repos = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
+
+        manager.initialize().await.unwrap();
+
+        assert_eq!(store.load().unwrap().repos, vec![present_root.clone()]);
+        assert_eq!(
+            repos
+                .read()
+                .await
+                .iter()
+                .map(|repo| repo.root.clone())
+                .collect::<Vec<_>>(),
+            vec![present_root]
+        );
     }
 
     async fn send_add_watch(
