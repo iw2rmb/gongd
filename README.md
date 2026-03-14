@@ -222,18 +222,6 @@ Rules:
 Machine-readable schema:
 - `schemas/gongd.schema.json`
 
-## Suggested next steps
-
-Good follow-ups for a second version:
-
-- support gitdir files and worktrees
-- reload ignore matchers when `.gitignore` changes
-- add per-client subscriptions
-- add event batching
-- add UDP mode
-- include commit OID / branch name on `HEAD` changes
-- expose a health endpoint
-
 ## SDKs
 
 - Go SDK: `sdk/go-gongd`
