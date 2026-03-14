@@ -55,8 +55,7 @@ impl ConfigStore {
     pub fn watch_dir(&self) -> PathBuf {
         self.path
             .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf)
     }
 }
 

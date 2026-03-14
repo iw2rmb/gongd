@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use notify::{Config, RecommendedWatcher, RecursiveMode, Result as NotifyResult, Watcher};
@@ -16,7 +16,7 @@ pub struct ConfigWatch {
     startup_cli_inputs: Vec<PathBuf>,
     store: ConfigStore,
     rx: Option<mpsc::UnboundedReceiver<()>>,
-    _watcher: Option<RecommendedWatcher>,
+    watcher: Option<RecommendedWatcher>,
 }
 
 impl ConfigWatch {
@@ -25,12 +25,12 @@ impl ConfigWatch {
             startup_cli_inputs,
             store,
             rx: None,
-            _watcher: None,
+            watcher: None,
         }
     }
 
     pub fn start(&mut self) -> io::Result<()> {
-        if self._watcher.is_some() {
+        if self.watcher.is_some() {
             return Ok(());
         }
 
@@ -39,10 +39,10 @@ impl ConfigWatch {
 
         let (tx, rx) = mpsc::unbounded_channel();
         let watcher =
-            start_config_watcher(watch_dir, tx).map_err(|err| io::Error::other(err.to_string()))?;
+            start_config_watcher(&watch_dir, tx).map_err(|err| io::Error::other(err.to_string()))?;
 
         self.rx = Some(rx);
-        self._watcher = Some(watcher);
+        self.watcher = Some(watcher);
         Ok(())
     }
 
@@ -69,15 +69,12 @@ impl ConfigWatch {
             return Ok(());
         }
 
-        let repos: Vec<PathBuf> = build_startup_repos(self.startup_cli_inputs.clone())
-            .into_iter()
-            .map(|repo| repo.root)
-            .collect();
-        if repos.is_empty() {
+        let roots = discover_repo_roots(self.startup_cli_inputs.clone());
+        if roots.is_empty() {
             return Ok(());
         }
 
-        self.store.save(&GongdConfig { repos })
+        self.save_roots(&roots)
     }
 
     pub fn load_repo_states_for_apply(&self) -> io::Result<Option<Vec<RepoState>>> {
@@ -95,10 +92,7 @@ impl ConfigWatch {
 
     pub fn load_roots_for_write(&self) -> io::Result<BTreeSet<PathBuf>> {
         let config = self.store.load()?;
-        Ok(build_startup_repos(config.repos)
-            .into_iter()
-            .map(|repo| repo.root)
-            .collect())
+        Ok(discover_repo_roots(config.repos))
     }
 
     pub fn save_roots(&self, roots: &BTreeSet<PathBuf>) -> io::Result<()> {
@@ -109,7 +103,7 @@ impl ConfigWatch {
 }
 
 fn start_config_watcher(
-    watch_dir: PathBuf,
+    watch_dir: &Path,
     tx: mpsc::UnboundedSender<()>,
 ) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
@@ -122,6 +116,13 @@ fn start_config_watcher(
         Config::default(),
     )?;
 
-    watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
+    watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
     Ok(watcher)
+}
+
+fn discover_repo_roots(paths: Vec<PathBuf>) -> BTreeSet<PathBuf> {
+    build_startup_repos(paths)
+        .into_iter()
+        .map(|repo| repo.root)
+        .collect()
 }

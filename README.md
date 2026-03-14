@@ -2,6 +2,9 @@
 
 `gongd` (git + pong + daemon) is a small Unix-socket daemon for local development tooling.
 
+Current release: `0.1.0`.
+Versioning follows SemVer.
+
 It watches one or more local Git repositories, filters worktree events using Git-compatible ignore rules, watches `.git/` for repository state changes, and broadcasts newline-delimited JSON events to every connected Unix-socket client.
 
 ## What it does
@@ -65,6 +68,15 @@ cargo install --path .
 ```
 
 That typically places `gongd` at `~/.cargo/bin/gongd`.
+
+## Install With Homebrew
+
+Tap this repository, then install the formula:
+
+```bash
+brew tap iw2rmb/gongd https://github.com/iw2rmb/gongd
+brew install gongd
+```
 
 ## Run
 

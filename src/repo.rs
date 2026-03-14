@@ -84,8 +84,8 @@ pub fn normalize_repo_root(path: &Path) -> io::Result<PathBuf> {
 fn build_ignore_matcher(root: &Path) -> io::Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(root);
 
-    add_repo_gitignores(root, &mut builder)?;
-    add_repo_info_exclude(root, &mut builder)?;
+    add_repo_gitignores(root, &mut builder);
+    add_repo_info_exclude(root, &mut builder);
     add_global_gitignore(&mut builder);
 
     builder
@@ -93,7 +93,7 @@ fn build_ignore_matcher(root: &Path) -> io::Result<Gitignore> {
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
-fn add_repo_gitignores(root: &Path, builder: &mut GitignoreBuilder) -> io::Result<()> {
+fn add_repo_gitignores(root: &Path, builder: &mut GitignoreBuilder) {
     for entry in ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(false)
@@ -102,30 +102,24 @@ fn add_repo_gitignores(root: &Path, builder: &mut GitignoreBuilder) -> io::Resul
         .parents(false)
         .build()
     {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
+        let Ok(entry) = entry else { continue };
 
         if entry
             .path()
             .file_name()
             .and_then(|name| name.to_str())
-            .map(|name| name == ".gitignore")
-            .unwrap_or(false)
+            .is_some_and(|name| name == ".gitignore")
         {
             let _ = builder.add(entry.path());
         }
     }
-    Ok(())
 }
 
-fn add_repo_info_exclude(root: &Path, builder: &mut GitignoreBuilder) -> io::Result<()> {
+fn add_repo_info_exclude(root: &Path, builder: &mut GitignoreBuilder) {
     let exclude = root.join(".git").join("info").join("exclude");
     if exclude.exists() {
         let _ = builder.add(exclude);
     }
-    Ok(())
 }
 
 fn add_global_gitignore(builder: &mut GitignoreBuilder) {

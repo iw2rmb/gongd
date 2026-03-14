@@ -2,6 +2,8 @@
 
 `go-gongd` is a small Go SDK for `gongd`.
 
+Current release: `0.1.0`.
+
 It wraps the two daemon sockets:
 
 - `/tmp/gongd.sock` for the event stream

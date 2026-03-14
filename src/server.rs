@@ -82,7 +82,7 @@ async fn event_client_writer(
     loop {
         match rx.recv().await {
             Ok(line) => stream.write_all(line.as_bytes()).await?,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
         }
     }

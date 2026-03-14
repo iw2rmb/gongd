@@ -47,6 +47,12 @@ func TestAddWatch(t *testing.T) {
 	}
 }
 
+func TestVersion(t *testing.T) {
+	if Version != "0.1.0" {
+		t.Fatalf("unexpected version: %q", Version)
+	}
+}
+
 func TestListWatches(t *testing.T) {
 	socket := testSocketPath(t, "list")
 	listener, err := net.Listen("unix", socket)

@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	Version              = "0.1.0"
 	DefaultEventSocket   = "/tmp/gongd.sock"
 	DefaultControlSocket = "/tmp/gongd.ctl.sock"
 )

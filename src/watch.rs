@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Result as NotifyResult, Watcher};
@@ -69,7 +69,7 @@ impl WatchManager {
     pub async fn run(mut self, mut rx: mpsc::Receiver<ManagerRequest>) {
         loop {
             tokio::select! {
-                Some(request) = rx.recv() => self.handle_request(request).await,
+                Some(request) = rx.recv() => self.handle_request(request),
                 Some(()) = self.config_watch.recv() => {
                     if let Err(err) = self.reload_config_from_disk().await {
                         eprintln!("config reload failed: {err}");
@@ -80,13 +80,13 @@ impl WatchManager {
         }
     }
 
-    async fn handle_request(&mut self, request: ManagerRequest) {
+    fn handle_request(&mut self, request: ManagerRequest) {
         match request {
             ManagerRequest::AddWatch { repo, respond_to } => {
-                let _ = respond_to.send(self.add_watch(repo).await);
+                let _ = respond_to.send(self.add_watch(&repo));
             }
             ManagerRequest::RemoveWatch { repo, respond_to } => {
-                let _ = respond_to.send(self.remove_watch(repo).await);
+                let _ = respond_to.send(self.remove_watch(&repo));
             }
             ManagerRequest::ListWatches { respond_to } => {
                 let _ = respond_to.send(self.list_watches());
@@ -94,54 +94,58 @@ impl WatchManager {
         }
     }
 
-    async fn add_watch(&mut self, repo: PathBuf) -> ControlResponse {
-        let repo = match RepoState::discover(&repo) {
-            Ok(repo) => repo,
-            Err(err) => return ControlResponse::error(err.to_string()),
-        };
-        let root = repo.root.clone();
-
-        let mut next_roots = match self.config_watch.load_roots_for_write() {
-            Ok(roots) => roots,
-            Err(err) => return ControlResponse::error(err.to_string()),
-        };
-        let inserted = next_roots.insert(root.clone());
-
-        if let Err(err) = self.config_watch.save_roots(&next_roots) {
-            return ControlResponse::error(err.to_string());
-        }
-
-        if inserted {
-            ControlResponse::success_message(format!("watch added for {}", root.display()))
-        } else {
-            ControlResponse::success_message(format!("watch already configured for {}", root.display()))
-        }
+    fn add_watch(&mut self, repo: &Path) -> ControlResponse {
+        self.try_add_watch(repo)
+            .unwrap_or_else(|err| ControlResponse::error(err.to_string()))
     }
 
-    async fn remove_watch(&mut self, repo: PathBuf) -> ControlResponse {
-        let root = match normalize_repo_root(&repo) {
-            Ok(root) => root,
-            Err(err) => return ControlResponse::error(err.to_string()),
-        };
-
-        let mut next_roots = match self.config_watch.load_roots_for_write() {
-            Ok(roots) => roots,
-            Err(err) => return ControlResponse::error(err.to_string()),
-        };
-
-        if !next_roots.remove(&root) {
-            return ControlResponse::error(format!("watch not found for {}", root.display()));
-        }
-
-        if let Err(err) = self.config_watch.save_roots(&next_roots) {
-            return ControlResponse::error(err.to_string());
-        }
-
-        ControlResponse::success_message(format!("watch removed for {}", root.display()))
+    fn remove_watch(&mut self, repo: &Path) -> ControlResponse {
+        self.try_remove_watch(repo)
+            .unwrap_or_else(|err| ControlResponse::error(err.to_string()))
     }
 
     fn list_watches(&self) -> ControlResponse {
         ControlResponse::list(self.watchers.keys().cloned().collect())
+    }
+
+    fn try_add_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
+        let root = RepoState::discover(repo)?.root;
+        let inserted = self.persist_roots(|roots| Ok(roots.insert(root.clone())))?;
+
+        Ok(if inserted {
+            ControlResponse::success_message(format!("watch added for {}", root.display()))
+        } else {
+            ControlResponse::success_message(format!("watch already configured for {}", root.display()))
+        })
+    }
+
+    fn try_remove_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
+        let root = normalize_repo_root(repo)?;
+        self.persist_roots(|roots| {
+            if roots.remove(&root) {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("watch not found for {}", root.display()),
+                ))
+            }
+        })?;
+
+        Ok(ControlResponse::success_message(format!(
+            "watch removed for {}",
+            root.display()
+        )))
+    }
+
+    fn persist_roots<T>(
+        &self,
+        mutate: impl FnOnce(&mut BTreeSet<PathBuf>) -> io::Result<T>,
+    ) -> io::Result<T> {
+        let mut roots = self.config_watch.load_roots_for_write()?;
+        let result = mutate(&mut roots)?;
+        self.config_watch.save_roots(&roots)?;
+        Ok(result)
     }
 
     async fn reload_config_from_disk(&mut self) -> io::Result<()> {
@@ -174,7 +178,7 @@ impl WatchManager {
             return Ok(());
         }
 
-        let watcher = start_repo_watcher(repo.clone(), self.raw_tx.clone())?;
+        let watcher = start_repo_watcher(&repo, self.raw_tx.clone())?;
         self.watchers.insert(
             repo.root.clone(),
             WatchRegistration {
@@ -196,7 +200,7 @@ impl WatchManager {
     }
 }
 
-fn start_repo_watcher(repo: RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {
+fn start_repo_watcher(repo: &RepoState, tx: mpsc::Sender<RawEvent>) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
         move |event| {
             let _ = tx.blocking_send(event);
