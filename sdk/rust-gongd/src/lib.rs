@@ -1,14 +1,13 @@
-use std::{
-    fmt,
-    io::{self, BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-};
+mod control;
+mod watch;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{fmt, io, path::PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_EVENT_SOCKET: &str = "/tmp/gongd.sock";
 pub const DEFAULT_CONTROL_SOCKET: &str = "/tmp/gongd.ctl.sock";
+pub const VERSION: &str = "v0.1.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,68 +102,6 @@ impl Client {
             control_socket: control_socket.into(),
         }
     }
-
-    pub fn subscribe(&self) -> Result<EventStream, Error> {
-        let stream = self.connect_event()?;
-        Ok(EventStream {
-            reader: BufReader::new(stream),
-            line_buf: String::new(),
-        })
-    }
-
-    pub fn add_watch(&self, repo: impl AsRef<Path>) -> Result<ControlResponse, Error> {
-        self.send_repo_control(RepoControlOp::AddWatch, repo)
-    }
-
-    pub fn remove_watch(&self, repo: impl AsRef<Path>) -> Result<ControlResponse, Error> {
-        self.send_repo_control(RepoControlOp::RemoveWatch, repo)
-    }
-
-    pub fn list_watches(&self) -> Result<Vec<String>, Error> {
-        let response: ControlResponse = self.send_control(ControlRequest {
-            op: "list_watches",
-            repo: None,
-        })?;
-        Ok(response.repos.unwrap_or_default())
-    }
-
-    fn send_control<T: Serialize>(&self, request: T) -> Result<ControlResponse, Error> {
-        let mut stream = self.connect_control()?;
-        write_json_line(&mut stream, &request)?;
-
-        let mut reader = BufReader::new(stream);
-        let response: ControlResponse = read_json_line(&mut reader)?;
-        if response.ok {
-            Ok(response)
-        } else {
-            Err(Error::Daemon(response.error.clone().unwrap_or_else(|| {
-                "gongd returned an unsuccessful response".to_owned()
-            })))
-        }
-    }
-
-    fn send_repo_control(
-        &self,
-        op: RepoControlOp,
-        repo: impl AsRef<Path>,
-    ) -> Result<ControlResponse, Error> {
-        self.send_control(ControlRequest {
-            op: op.as_str(),
-            repo: Some(repo.as_ref().display().to_string()),
-        })
-    }
-
-    fn connect_event(&self) -> Result<UnixStream, Error> {
-        Self::connect(&self.event_socket)
-    }
-
-    fn connect_control(&self) -> Result<UnixStream, Error> {
-        Self::connect(&self.control_socket)
-    }
-
-    fn connect(path: &Path) -> Result<UnixStream, Error> {
-        Ok(UnixStream::connect(path)?)
-    }
 }
 
 impl Default for Client {
@@ -173,185 +110,37 @@ impl Default for Client {
     }
 }
 
-pub struct EventStream {
-    reader: BufReader<UnixStream>,
-    line_buf: String,
-}
+#[cfg(test)]
+mod tests {
+    use crate::VERSION;
 
-impl EventStream {
-    pub fn next_event(&mut self) -> Result<Option<Event>, Error> {
-        read_optional_json_line(&mut self.reader, &mut self.line_buf)
+    #[test]
+    fn version_matches_release_tag() {
+        assert_eq!(VERSION, "v0.1.0");
     }
-}
-
-#[derive(Serialize)]
-struct ControlRequest<'a> {
-    op: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    repo: Option<String>,
-}
-
-#[derive(Clone, Copy)]
-enum RepoControlOp {
-    AddWatch,
-    RemoveWatch,
-}
-
-impl RepoControlOp {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::AddWatch => "add_watch",
-            Self::RemoveWatch => "remove_watch",
-        }
-    }
-}
-
-fn read_json_line<T: DeserializeOwned>(reader: &mut impl BufRead) -> Result<T, Error> {
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    Ok(serde_json::from_str(line.trim())?)
-}
-
-fn read_optional_json_line<T: DeserializeOwned>(
-    reader: &mut impl BufRead,
-    line_buf: &mut String,
-) -> Result<Option<T>, Error> {
-    line_buf.clear();
-    let read = reader.read_line(line_buf)?;
-    if read == 0 {
-        return Ok(None);
-    }
-
-    let line = line_buf.trim();
-    if line.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(serde_json::from_str(line)?))
-}
-
-fn write_json_line(writer: &mut impl Write, value: &impl Serialize) -> Result<(), Error> {
-    serde_json::to_writer(&mut *writer, value)?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
+mod test_support {
     use std::{
         fs,
-        io::{BufRead, BufReader, Write},
+        io::{BufRead, BufReader},
         os::unix::net::UnixListener,
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{write_json_line, Client, ControlResponse, Error, EventType};
+    use serde::Serialize;
 
-    #[test]
-    fn add_watch_sends_expected_request() {
-        let control_socket = socket_path("ctl-add");
-        let _guard = SocketGuard::new(&control_socket);
-        let handle = spawn_control_server(
-            &control_socket,
-            |value| {
-                assert_eq!(value["op"], "add_watch");
-                assert_eq!(value["repo"], "/tmp/repo");
-            },
-            ControlResponse {
-                ok: true,
-                message: Some("watch added".to_owned()),
-                error: None,
-                repos: None,
-            },
-        );
+    use crate::ControlResponse;
 
-        let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let response = client.add_watch("/tmp/repo").unwrap();
-        assert_eq!(response.message.as_deref(), Some("watch added"));
-        handle.join().unwrap();
+    pub fn write_json_line(writer: &mut impl std::io::Write, value: &impl Serialize) {
+        serde_json::to_writer(&mut *writer, value).unwrap();
+        writer.write_all(b"\n").unwrap();
+        writer.flush().unwrap();
     }
 
-    #[test]
-    fn list_watches_returns_repo_list() {
-        let control_socket = socket_path("ctl-list");
-        let _guard = SocketGuard::new(&control_socket);
-        let handle = spawn_control_server(
-            &control_socket,
-            |value| {
-                assert_eq!(value["op"], "list_watches");
-            },
-            ControlResponse {
-                ok: true,
-                message: None,
-                error: None,
-                repos: Some(vec!["/tmp/a".to_owned(), "/tmp/b".to_owned()]),
-            },
-        );
-
-        let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let repos = client.list_watches().unwrap();
-        assert_eq!(repos, vec!["/tmp/a", "/tmp/b"]);
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn remove_watch_surfaces_daemon_error() {
-        let control_socket = socket_path("ctl-remove");
-        let _guard = SocketGuard::new(&control_socket);
-        let handle = spawn_control_server(
-            &control_socket,
-            |_| {},
-            ControlResponse {
-                ok: false,
-                message: None,
-                error: Some("watch not found".to_owned()),
-                repos: None,
-            },
-        );
-
-        let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let err = client.remove_watch("/tmp/repo").unwrap_err();
-        match err {
-            Error::Daemon(message) => assert_eq!(message, "watch not found"),
-            other => panic!("unexpected error: {other}"),
-        }
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn subscribe_reads_events_until_eof() {
-        let event_socket = socket_path("evt");
-        let _guard = SocketGuard::new(&event_socket);
-        let listener = UnixListener::bind(&event_socket).unwrap();
-
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .write_all(b"{\"repo\":\"/tmp/repo\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n")
-                .unwrap();
-            stream
-                .write_all(b"{\"repo\":\"/tmp/repo\",\"type\":\"repo_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n")
-                .unwrap();
-        });
-
-        let client = Client::with_sockets(&event_socket, "/tmp/unused.sock");
-        let mut stream = client.subscribe().unwrap();
-
-        let first = stream.next_event().unwrap().unwrap();
-        assert_eq!(first.event_type, EventType::FileModified);
-        assert_eq!(first.path.as_deref(), Some("main.go"));
-
-        let second = stream.next_event().unwrap().unwrap();
-        assert_eq!(second.event_type, EventType::RepoHeadChanged);
-        assert_eq!(second.git_path.as_deref(), Some("HEAD"));
-
-        assert!(stream.next_event().unwrap().is_none());
-        handle.join().unwrap();
-    }
-
-    fn spawn_control_server(
+    pub fn spawn_control_server(
         socket: &str,
         assert_request: impl FnOnce(serde_json::Value) + Send + 'static,
         response: ControlResponse,
@@ -366,11 +155,11 @@ mod tests {
             assert_request(value);
 
             let mut stream = reader.into_inner();
-            write_json_line(&mut stream, &response).unwrap();
+            write_json_line(&mut stream, &response);
         })
     }
 
-    fn socket_path(name: &str) -> String {
+    pub fn socket_path(name: &str) -> String {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -378,12 +167,12 @@ mod tests {
         format!("/tmp/gongd-sdk-{name}-{unique}.sock")
     }
 
-    struct SocketGuard {
+    pub struct SocketGuard {
         path: String,
     }
 
     impl SocketGuard {
-        fn new(path: &str) -> Self {
+        pub fn new(path: &str) -> Self {
             let _ = fs::remove_file(path);
             Self {
                 path: path.to_owned(),

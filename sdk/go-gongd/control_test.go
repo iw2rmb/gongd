@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"path/filepath"
 	"strings"
@@ -48,7 +47,7 @@ func TestAddWatch(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	if Version != "0.1.0" {
+	if Version != "v0.1.0" {
 		t.Fatalf("unexpected version: %q", Version)
 	}
 }
@@ -101,51 +100,6 @@ func TestRemoveWatchReturnsDaemonError(t *testing.T) {
 	var daemonErr *DaemonError
 	if !strings.Contains(err.Error(), "watch not found") || !errors.As(err, &daemonErr) {
 		t.Fatalf("unexpected error: %T %v", err, err)
-	}
-}
-
-func TestSubscribe(t *testing.T) {
-	socket := testSocketPath(t, "events")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer listener.Close()
-
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		_, _ = conn.Write([]byte("{\"repo\":\"/tmp/repo\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n"))
-		_, _ = conn.Write([]byte("{\"repo\":\"/tmp/repo\",\"type\":\"repo_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n"))
-	}()
-
-	client := NewClient()
-	client.EventSocket = socket
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	events, errs := client.Subscribe(ctx)
-	first := <-events
-	second := <-events
-
-	if first.Type != EventFileModified {
-		t.Fatalf("unexpected first event: %#v", first)
-	}
-	if first.Path == nil || *first.Path != "main.go" {
-		t.Fatalf("unexpected first path: %#v", first.Path)
-	}
-	if second.Type != EventRepoHeadChanged {
-		t.Fatalf("unexpected second event: %#v", second)
-	}
-	if second.GitPath == nil || *second.GitPath != "HEAD" {
-		t.Fatalf("unexpected second git path: %#v", second.GitPath)
-	}
-	if err := <-errs; !errors.Is(err, io.EOF) {
-		t.Fatalf("unexpected subscription error: %v", err)
 	}
 }
 
