@@ -1,6 +1,6 @@
-# go-gong
+# go-gongd
 
-`go-gong` is a small Go SDK for `gongd`.
+`go-gongd` is a small Go SDK for `gongd`.
 
 Current release: `v0.1.0`.
 
@@ -16,7 +16,7 @@ Event subscriptions reconnect automatically after daemon restarts or socket relo
 From this repository:
 
 ```bash
-cd sdk/go-gong
+cd sdk/go-gongd
 go test ./...
 ```
 
@@ -29,7 +29,7 @@ import (
 	"context"
 	"fmt"
 
-	gongd "go-gong"
+	gongd "go-gongd"
 )
 
 func main() {

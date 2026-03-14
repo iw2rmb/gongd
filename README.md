@@ -141,6 +141,6 @@ Rules:
 
 ## SDKs
 
-- Go: [sdk/go-gong](sdk/go-gong)
-- Rust: [sdk/rs-gong](sdk/rs-gong)
-- TypeScript: [sdk/ts-gong](sdk/ts-gong)
+- Go: [sdk/go-gongd](sdk/go-gongd)
+- Rust: [sdk/rs-gongd](sdk/rs-gongd)
+- TypeScript: [sdk/ts-gongd](sdk/ts-gongd)

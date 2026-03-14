@@ -1,6 +1,6 @@
-# ts-gong
+# ts-gongd
 
-`ts-gong` is a small TypeScript SDK for `gongd`.
+`ts-gongd` is a small TypeScript SDK for `gongd`.
 
 Current release: `v0.1.0`.
 
@@ -16,14 +16,14 @@ Event subscriptions reconnect automatically after daemon restarts or socket relo
 From this repository:
 
 ```bash
-cd sdk/ts-gong
+cd sdk/ts-gongd
 npm test
 ```
 
 ## Usage
 
 ```ts
-import { Client } from "ts-gong";
+import { Client } from "ts-gongd";
 
 const client = new Client();
 

@@ -147,7 +147,7 @@ test("subscribe reconnects after stream EOF", async () => {
 
 async function socketPathFor(name: string): Promise<string> {
   const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return join("/tmp", `ts-gong-${name}-${unique}.sock`);
+  return join("/tmp", `ts-gongd-${name}-${unique}.sock`);
 }
 
 function collectOneLine(socket: Socket): Promise<string> {

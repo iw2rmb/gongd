@@ -1,12 +1,12 @@
 [package]
-name = "rs-gong"
+name = "rs-gongd"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Rust SDK for gongd over Unix sockets"
 
 [lib]
-name = "rs_gong"
+name = "rs_gongd"
 path = "src/lib.rs"
 
 [dependencies]

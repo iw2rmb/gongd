@@ -164,7 +164,7 @@ mod test_support {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        format!("/tmp/rs-gong-{name}-{unique}.sock")
+        format!("/tmp/rs-gongd-{name}-{unique}.sock")
     }
 
     pub struct SocketGuard {

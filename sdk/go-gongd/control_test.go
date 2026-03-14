@@ -141,7 +141,7 @@ func serveOneControlConn(t *testing.T, listener net.Listener, requests chan<- ma
 func testSocketPath(t *testing.T, name string) string {
 	t.Helper()
 
-	return filepath.Join("/tmp", "go-gong-"+name+"-"+time.Now().Format("150405.000000000")+".sock")
+	return filepath.Join("/tmp", "go-gongd-"+name+"-"+time.Now().Format("150405.000000000")+".sock")
 }
 
 func stringPtr(v string) *string {

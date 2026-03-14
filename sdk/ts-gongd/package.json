@@ -1,5 +1,5 @@
 {
-  "name": "ts-gong",
+  "name": "ts-gongd",
   "version": "0.1.0",
   "description": "TypeScript SDK for gongd over Unix sockets",
   "license": "MIT",
