@@ -150,6 +150,6 @@ Schema:
 
 ## SDKs
 
-- Go SDK: [sdk/go-gong](sdk/go-gong)
-- Rust SDK: [sdk/rs-gong](sdk/rs-gong)
-- TypeScript SDK: [sdk/ts-gong](sdk/ts-gong)
+- Go: [sdk/go-gong](sdk/go-gong)
+- Rust: [sdk/rs-gong](sdk/rs-gong)
+- TypeScript: [sdk/ts-gong](sdk/ts-gong)
