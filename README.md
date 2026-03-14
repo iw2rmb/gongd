@@ -119,7 +119,7 @@ printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - 
 `add_watch` and `remove_watch` rewrite `~/.gong/config.json`. The config watcher applies the resulting watch-set change.
 
 Schema:
-- `schemas/gongd.ctl.schema.json`
+- [schemas/gongd.ctl.schema.json](schemas/gongd.ctl.schema.json)
 
 
 ## Example output
