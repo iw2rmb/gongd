@@ -98,7 +98,7 @@ Check example at [scripts/client.sh](scripts/client.sh).
 
 The control socket is request/response JSON over a separate Unix socket.
 
-Schema: [schemas/gongd.ctl.schema.json](schemas/gongd.ctl.schema.json).
+Schema: [schemas/gongd.ctl.schema.json](schemas/gongd.ctl.schema.json)
 
 List watches:
 
@@ -134,7 +134,7 @@ printf '%s\n' '{"op":"remove_watch","repo":"/absolute/path/to/repo"}' | socat - 
 
 Each connected client receives the same broadcast stream.
 
-Schema: [schemas/gongd.schema.json](schemas/gongd.schema.json).
+Schema: [schemas/gongd.schema.json](schemas/gongd.schema.json)
 
 Transport:
 - Unix domain socket
