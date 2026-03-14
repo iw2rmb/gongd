@@ -7,7 +7,7 @@ description = "A local Git-aware filesystem event daemon with Unix socket broadc
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-notify = "6"
+notify = "8.2.0"
 ignore = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

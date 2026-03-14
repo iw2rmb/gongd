@@ -62,6 +62,7 @@ cargo install --path .
 ```bash
 brew tap iw2rmb/gongd https://github.com/iw2rmb/gongd
 brew install gongd
+brew services start gongd
 ```
 
 ## Run
