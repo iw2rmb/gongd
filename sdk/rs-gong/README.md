@@ -1,6 +1,6 @@
-# rust-gongd
+# rs-gong
 
-`gongd-sdk` is a small Rust SDK for `gongd`.
+`rs-gong` is a small Rust SDK for `gongd`.
 
 Current release: `v0.1.0`.
 
@@ -16,14 +16,14 @@ Event subscriptions reconnect automatically after daemon restarts or socket relo
 From this repository:
 
 ```bash
-cd sdk/rust-gongd
+cd sdk/rs-gong
 cargo test
 ```
 
 ## Usage
 
 ```rust
-use gongd_sdk::Client;
+use rs_gong::Client;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
