@@ -1,6 +1,6 @@
 use std::{io, sync::Arc, time::Duration};
 
-use notify::{Event, EventKind};
+use notify::EventKind;
 use tokio::sync::oneshot;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 
@@ -10,7 +10,7 @@ use crate::{
     event::{translate_event, Deduper, SharedDeduper},
     repo::RepoState,
     server::{control_socket_server, event_socket_server, prepare_socket_path},
-    watch::{ManagerRequest, SharedRepos, WatchManager},
+    watch::{ManagerRequest, RawEvent, SharedRepos, WatchManager},
 };
 
 pub async fn run(args: Args) -> io::Result<()> {
@@ -61,7 +61,6 @@ pub async fn run(args: Args) -> io::Result<()> {
 
         match msg {
             Ok(event) => {
-                let snapshot = repos.read().await.clone();
                 for wire in translate_event(&snapshot, event, deduper.clone()).await {
                     match serde_json::to_string(&wire) {
                         Ok(mut line) => {
@@ -82,7 +81,7 @@ pub async fn run(args: Args) -> io::Result<()> {
 async fn remove_missing_watches(
     manager_tx: &mpsc::Sender<ManagerRequest>,
     repos: &[RepoState],
-    event: &notify::Result<Event>,
+    event: &RawEvent,
 ) {
     if !should_prune_missing_watches(event) {
         return;
@@ -110,7 +109,7 @@ async fn remove_missing_watches(
     }
 }
 
-fn should_prune_missing_watches(event: &notify::Result<Event>) -> bool {
+fn should_prune_missing_watches(event: &RawEvent) -> bool {
     match event {
         Ok(event) => matches!(event.kind, EventKind::Remove(_)),
         Err(_) => true,

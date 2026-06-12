@@ -8,13 +8,13 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::{ConfigStore, GongdConfig},
-    repo::{build_startup_repos, RepoState},
+    repo::RepoState,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ConfiguredRepo {
     pub original: PathBuf,
-    pub resolved: PathBuf,
+    pub state: RepoState,
 }
 
 struct LoadedConfiguredRepos {
@@ -101,9 +101,9 @@ impl ConfigWatch {
             self.save_configured_repos(&loaded.repos)?;
         }
 
-        Ok(Some(build_startup_repos(
-            loaded.repos.into_iter().map(|repo| repo.resolved),
-        )))
+        Ok(Some(
+            loaded.repos.into_iter().map(|repo| repo.state).collect(),
+        ))
     }
 
     pub fn load_configured_repos_for_write(&self) -> io::Result<Vec<ConfiguredRepo>> {
@@ -146,11 +146,15 @@ fn start_config_watcher(
 
 impl ConfiguredRepo {
     pub fn from_path(path: &Path) -> io::Result<Self> {
-        let resolved = RepoState::discover(path)?.root;
+        let state = RepoState::discover(path)?;
         Ok(Self {
             original: path.to_path_buf(),
-            resolved,
+            state,
         })
+    }
+
+    pub fn resolved(&self) -> &Path {
+        &self.state.root
     }
 }
 
@@ -160,7 +164,7 @@ fn load_configured_repos(paths: Vec<PathBuf>) -> LoadedConfiguredRepos {
 
     for original in &paths {
         match ConfiguredRepo::from_path(original) {
-            Ok(repo) if !seen.insert(repo.resolved.clone()) => {}
+            Ok(repo) if !seen.insert(repo.state.root.clone()) => {}
             Ok(repo) => repos.push(repo),
             Err(err) => eprintln!("skipping {}: {err}", original.display()),
         }
@@ -189,7 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_reload_dedupes_by_resolved_path_and_keeps_first_original() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-config-home");
         let repo = home.path().join("repo");
         init_git_repo(&repo);
@@ -223,7 +227,7 @@ mod tests {
 
     #[test]
     fn seed_from_cli_keeps_original_paths() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-config-seed-home");
         let repo = home.path().join("repo");
         init_git_repo(&repo);

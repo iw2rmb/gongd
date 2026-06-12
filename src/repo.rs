@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
     sync::Arc,
@@ -51,24 +50,6 @@ impl RepoState {
             .matched_path_or_any_parents(rel, is_dir)
             .is_ignore()
     }
-}
-
-pub fn build_startup_repos(paths: impl IntoIterator<Item = PathBuf>) -> Vec<RepoState> {
-    let mut repos = Vec::new();
-    let mut seen = HashSet::new();
-
-    for input in paths {
-        match RepoState::discover(&input) {
-            Ok(repo) => {
-                if seen.insert(repo.root.clone()) {
-                    repos.push(repo);
-                }
-            }
-            Err(err) => eprintln!("skipping {}: {err}", input.display()),
-        }
-    }
-
-    repos
 }
 
 pub fn normalize_repo_root(path: &Path) -> io::Result<PathBuf> {
@@ -160,7 +141,7 @@ mod tests {
 
     #[test]
     fn build_ignore_matcher_ignores_repo_local_excludesfile_from_launch_directory() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-home");
         let launcher = TestDir::new("gongd-launcher");
         let watched = TestDir::new("gongd-watched");
@@ -185,7 +166,7 @@ mod tests {
 
     #[test]
     fn build_ignore_matcher_respects_global_excludesfile() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-home");
         let watched = TestDir::new("gongd-watched");
         let global_ignore = home.path().join(".config/git/global-ignore");
@@ -208,7 +189,7 @@ mod tests {
 
     #[test]
     fn normalize_repo_root_expands_home_prefix() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-home");
         let repo = home.path().join("repo");
         init_git_repo(&repo);

@@ -43,7 +43,7 @@ impl EntryKind {
     fn modified_event_type(self) -> EventType {
         match self {
             Self::File => EventType::FileModified,
-            Self::Dir => EventType::DirCreated,
+            Self::Dir => EventType::DirModified,
         }
     }
 }
@@ -343,13 +343,14 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use notify::{
-        event::{EventAttributes, RemoveKind},
+        event::{EventAttributes, ModifyKind, RemoveKind},
         Event, EventKind,
     };
     use tokio::sync::Mutex;
 
     use super::{translate_event, Deduper, SharedDeduper};
     use crate::{
+        protocol::EventType,
         repo::RepoState,
         test_support::{init_git_repo, write_file, TestDir},
     };
@@ -378,5 +379,29 @@ mod tests {
         let translated = translate_event(&[repo], event, deduper()).await;
 
         assert!(translated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn directory_modify_emits_dir_modified() {
+        let tmp = TestDir::new("gongd-event-modify-dir");
+        init_git_repo(tmp.path());
+
+        let dir = tmp.path().join("tracked-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let repo = RepoState::discover(tmp.path()).unwrap();
+
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Metadata(notify::event::MetadataKind::Any)),
+            paths: vec![dir],
+            attrs: EventAttributes::default(),
+        };
+
+        let translated = translate_event(&[repo], event, deduper()).await;
+
+        assert_eq!(
+            translated.iter().map(|e| e.event_type).collect::<Vec<_>>(),
+            vec![EventType::DirModified],
+        );
     }
 }

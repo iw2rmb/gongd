@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn expand_path_expands_home_and_env_vars() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-paths-home");
         let workspace = TestDir::new("gongd-paths-workspace");
         let _home = ScopedEnvVar::set("HOME", home.path());
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn expand_path_errors_for_unset_env_vars() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let err = expand_path(Path::new("$GONGD_TEST_UNSET/repo")).unwrap_err();
 
         assert_eq!(err.kind(), ErrorKind::NotFound);

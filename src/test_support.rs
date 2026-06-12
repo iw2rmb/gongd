@@ -2,13 +2,26 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Mutex, OnceLock},
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use tokio::sync::Mutex;
 
 pub fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+pub fn unique_suffix() -> String {
+    format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
 }
 
 pub struct TestDir {
@@ -17,15 +30,7 @@ pub struct TestDir {
 
 impl TestDir {
     pub fn new(prefix: &str) -> Self {
-        let unique = format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
-        let path = env::temp_dir().join(unique);
+        let path = env::temp_dir().join(format!("{prefix}-{}", unique_suffix()));
         fs::create_dir_all(&path).unwrap();
         Self { path }
     }
@@ -107,4 +112,15 @@ pub async fn wait_for(mut check: impl FnMut() -> bool) {
     }
 
     panic!("condition not met");
+}
+
+pub async fn wait_for_socket(path: &Path) {
+    for _ in 0..100 {
+        if path.exists() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    panic!("socket was not created: {}", path.display());
 }

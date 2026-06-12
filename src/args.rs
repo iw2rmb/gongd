@@ -1,4 +1,7 @@
-use std::{env, io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 
@@ -37,10 +40,7 @@ impl Args {
 }
 
 fn default_config_path() -> io::Result<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".gong").join("config.json"))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))
+    expand_path(Path::new("~/.gong/config.json"))
 }
 
 #[cfg(test)]
@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn config_path_expands_home_prefix() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-args-home");
         let _home = ScopedEnvVar::set("HOME", home.path());
         let args = Args::parse_from(["gongd", "--config", "~/.gong/custom.json"]);

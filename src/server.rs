@@ -149,7 +149,6 @@ mod tests {
     use std::{
         path::{Path, PathBuf},
         sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
     };
 
     use tokio::{
@@ -163,7 +162,7 @@ mod tests {
     use crate::{
         config::ConfigStore,
         protocol::ControlResponse,
-        test_support::{init_git_repo, TestDir},
+        test_support::{init_git_repo, unique_suffix, wait_for_socket, TestDir},
         watch::WatchManager,
     };
 
@@ -243,21 +242,7 @@ mod tests {
     }
 
     fn short_socket_path(kind: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        PathBuf::from(format!("/tmp/gongd-{kind}-{unique}.sock"))
-    }
-
-    async fn wait_for_socket(path: &Path) {
-        for _ in 0..100 {
-            if path.exists() {
-                return;
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-        panic!("socket was not created: {}", path.display());
+        PathBuf::from(format!("/tmp/gongd-{kind}-{}.sock", unique_suffix()))
     }
 
     async fn send_request(socket: &Path, request: &str) -> ControlResponse {

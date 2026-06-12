@@ -21,6 +21,7 @@ pub enum EventType {
     FileDeleted,
     FileRenamed,
     DirCreated,
+    DirModified,
     DirDeleted,
     DirRenamed,
     RepoHeadChanged,

@@ -95,13 +95,11 @@ impl WatchManager {
     }
 
     fn add_watch(&mut self, repo: &Path) -> ControlResponse {
-        self.try_add_watch(repo)
-            .unwrap_or_else(|err| ControlResponse::error(err.to_string()))
+        respond(self.try_add_watch(repo))
     }
 
     fn remove_watch(&mut self, repo: &Path) -> ControlResponse {
-        self.try_remove_watch(repo)
-            .unwrap_or_else(|err| ControlResponse::error(err.to_string()))
+        respond(self.try_remove_watch(repo))
     }
 
     fn list_watches(&self) -> ControlResponse {
@@ -113,7 +111,7 @@ impl WatchManager {
         let inserted = self.persist_repos(|repos| {
             if repos
                 .iter()
-                .any(|existing| existing.resolved == repo.resolved)
+                .any(|existing| existing.resolved() == repo.resolved())
             {
                 Ok(false)
             } else {
@@ -123,11 +121,14 @@ impl WatchManager {
         })?;
 
         Ok(if inserted {
-            ControlResponse::success_message(format!("watch added for {}", repo.resolved.display()))
+            ControlResponse::success_message(format!(
+                "watch added for {}",
+                repo.resolved().display()
+            ))
         } else {
             ControlResponse::success_message(format!(
                 "watch already configured for {}",
-                repo.resolved.display()
+                repo.resolved().display()
             ))
         })
     }
@@ -135,7 +136,7 @@ impl WatchManager {
     fn try_remove_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
         let root = normalize_repo_root(repo)?;
         self.persist_repos(|repos| {
-            if let Some(index) = repos.iter().position(|repo| repo.resolved == root) {
+            if let Some(index) = repos.iter().position(|repo| repo.resolved() == root) {
                 repos.remove(index);
                 Ok(())
             } else {
@@ -213,6 +214,10 @@ impl WatchManager {
     }
 }
 
+fn respond(result: io::Result<ControlResponse>) -> ControlResponse {
+    result.unwrap_or_else(|err| ControlResponse::error(err.to_string()))
+}
+
 fn start_repo_watcher(
     repo: &RepoState,
     tx: mpsc::Sender<RawEvent>,
@@ -272,7 +277,11 @@ mod tests {
         })
         .await;
 
-        let add_response = send_add_watch(&manager_tx, added_repo.clone()).await;
+        let add_response = send_watch_request(&manager_tx, |respond_to| ManagerRequest::AddWatch {
+            repo: added_repo.clone(),
+            respond_to,
+        })
+        .await;
         assert!(add_response.ok);
 
         wait_for(|| {
@@ -288,7 +297,12 @@ mod tests {
         })
         .await;
 
-        let remove_response = send_remove_watch(&manager_tx, cli_repo.clone()).await;
+        let remove_response =
+            send_watch_request(&manager_tx, |respond_to| ManagerRequest::RemoveWatch {
+                repo: cli_repo.clone(),
+                respond_to,
+            })
+            .await;
         assert!(remove_response.ok);
 
         wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_repo.clone()]))
@@ -339,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_watch_dedupes_against_existing_config_by_resolved_path() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-watch-manager-home");
         let repo = home.path().join("repo");
         init_git_repo(&repo);
@@ -368,7 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_watch_matches_configured_repo_by_resolved_path() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-watch-manager-remove-home");
         let repo = home.path().join("repo");
         init_git_repo(&repo);
@@ -392,25 +406,13 @@ mod tests {
         assert_eq!(store.load().unwrap().repos, Vec::<PathBuf>::new());
     }
 
-    async fn send_add_watch(
+    async fn send_watch_request(
         tx: &mpsc::Sender<ManagerRequest>,
-        repo: std::path::PathBuf,
+        make: impl FnOnce(oneshot::Sender<crate::protocol::ControlResponse>) -> ManagerRequest,
     ) -> crate::protocol::ControlResponse {
         let (respond_to, response_rx) = oneshot::channel();
-        let request = ManagerRequest::AddWatch { repo, respond_to };
 
-        tx.send(request).await.unwrap();
-        response_rx.await.unwrap()
-    }
-
-    async fn send_remove_watch(
-        tx: &mpsc::Sender<ManagerRequest>,
-        repo: std::path::PathBuf,
-    ) -> crate::protocol::ControlResponse {
-        let (respond_to, response_rx) = oneshot::channel();
-        let request = ManagerRequest::RemoveWatch { repo, respond_to };
-
-        tx.send(request).await.unwrap();
+        tx.send(make(respond_to)).await.unwrap();
         response_rx.await.unwrap()
     }
 }
