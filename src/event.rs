@@ -146,7 +146,7 @@ pub async fn translate_event(
     if is_rename_event(event.kind) && event.paths.len() >= 2 {
         let from = &event.paths[0];
         let to = &event.paths[1];
-        if let Some(folder) = folder_for_paths(folders, from, to) {
+        if let Some(folder) = folder_for(folders, &[from, to]) {
             if !folder.is_inside_git_dir(from) && !folder.is_inside_git_dir(to) {
                 if let Some(event) = emit_rename_event(folder, from, to, &deduper).await {
                     out.push(event);
@@ -164,7 +164,7 @@ async fn translate_path_event(
     kind: EventKind,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
-    let folder = folder_for_path(folders, path)?;
+    let folder = folder_for(folders, &[path])?;
     if folder.is_inside_git_dir(path) {
         translate_git_event(folder, path, kind, deduper).await
     } else {
@@ -246,18 +246,10 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
-fn folder_for_path<'a>(folders: &'a [MonitoredFolder], path: &Path) -> Option<&'a MonitoredFolder> {
-    folders.iter().find(|folder| path.starts_with(&folder.root))
-}
-
-fn folder_for_paths<'a>(
-    folders: &'a [MonitoredFolder],
-    left: &Path,
-    right: &Path,
-) -> Option<&'a MonitoredFolder> {
+fn folder_for<'a>(folders: &'a [MonitoredFolder], paths: &[&Path]) -> Option<&'a MonitoredFolder> {
     folders
         .iter()
-        .find(|folder| left.starts_with(&folder.root) && right.starts_with(&folder.root))
+        .find(|folder| paths.iter().all(|path| path.starts_with(&folder.root)))
 }
 
 fn is_rename_event(kind: EventKind) -> bool {

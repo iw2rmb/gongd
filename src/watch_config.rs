@@ -8,13 +8,13 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::{ConfigStore, GongdConfig},
-    folder::MonitoredFolder,
+    folder::{resolve_existing_dir, MonitoredFolder},
 };
 
 #[derive(Debug, Clone)]
 pub struct ConfiguredFolder {
     pub original: PathBuf,
-    pub state: MonitoredFolder,
+    pub root: PathBuf,
 }
 
 struct LoadedConfiguredFolders {
@@ -88,8 +88,8 @@ impl ConfigWatch {
     }
 
     pub fn load_folder_states_for_apply(&self) -> io::Result<Option<Vec<MonitoredFolder>>> {
-        let loaded = match self.load_configured_folders_snapshot() {
-            Ok(loaded) => loaded,
+        let folders = match self.reconcile_snapshot() {
+            Ok(folders) => folders,
             Err(err) if err.kind() == io::ErrorKind::InvalidData => {
                 eprintln!("{err}");
                 return Ok(None);
@@ -97,20 +97,23 @@ impl ConfigWatch {
             Err(err) => return Err(err),
         };
 
-        if loaded.changed {
-            self.save_configured_folders(&loaded.folders)?;
-        }
-
         Ok(Some(
-            loaded
-                .folders
-                .into_iter()
-                .map(|folder| folder.state)
+            folders
+                .iter()
+                .filter_map(|folder| {
+                    MonitoredFolder::discover(&folder.original)
+                        .map_err(|err| eprintln!("skipping {}: {err}", folder.original.display()))
+                        .ok()
+                })
                 .collect(),
         ))
     }
 
     pub fn load_configured_folders_for_write(&self) -> io::Result<Vec<ConfiguredFolder>> {
+        self.reconcile_snapshot()
+    }
+
+    fn reconcile_snapshot(&self) -> io::Result<Vec<ConfiguredFolder>> {
         let loaded = self.load_configured_folders_snapshot()?;
         if loaded.changed {
             self.save_configured_folders(&loaded.folders)?;
@@ -153,15 +156,15 @@ fn start_config_watcher(
 
 impl ConfiguredFolder {
     pub fn from_path(path: &Path) -> io::Result<Self> {
-        let state = MonitoredFolder::discover(path)?;
+        let root = resolve_existing_dir(path)?;
         Ok(Self {
             original: path.to_path_buf(),
-            state,
+            root,
         })
     }
 
     pub fn resolved(&self) -> &Path {
-        &self.state.root
+        &self.root
     }
 }
 
@@ -171,7 +174,7 @@ fn load_configured_folders(paths: Vec<PathBuf>) -> LoadedConfiguredFolders {
 
     for original in &paths {
         match ConfiguredFolder::from_path(original) {
-            Ok(folder) if !seen.insert(folder.state.root.clone()) => {}
+            Ok(folder) if !seen.insert(folder.root.clone()) => {}
             Ok(folder) => folders.push(folder),
             Err(err) => eprintln!("skipping {}: {err}", original.display()),
         }

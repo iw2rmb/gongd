@@ -16,21 +16,13 @@ pub struct MonitoredFolder {
 
 #[derive(Clone, Debug)]
 pub struct GitState {
-    pub git_dir: PathBuf,
+    git_dir: PathBuf,
     ignore: Arc<Gitignore>,
 }
 
 impl MonitoredFolder {
     pub fn discover(input: &Path) -> io::Result<Self> {
-        let input = expand_path(input)?;
-        let root = fs::canonicalize(&input)?;
-        if !root.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "folder path must be a directory",
-            ));
-        }
-
+        let root = resolve_existing_dir(input)?;
         let git_dir = root.join(".git");
         let git = if git_dir.is_dir() {
             Some(GitState {
@@ -61,6 +53,18 @@ impl MonitoredFolder {
     pub fn git_dir(&self) -> Option<&Path> {
         self.git.as_ref().map(|git| git.git_dir.as_path())
     }
+}
+
+pub fn resolve_existing_dir(input: &Path) -> io::Result<PathBuf> {
+    let input = expand_path(input)?;
+    let root = fs::canonicalize(&input)?;
+    if !root.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "folder path must be a directory",
+        ));
+    }
+    Ok(root)
 }
 
 pub fn normalize_folder_root(path: &Path) -> io::Result<PathBuf> {
