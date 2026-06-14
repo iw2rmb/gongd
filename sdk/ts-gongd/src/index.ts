@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-export const VERSION = "v0.1.1";
+export const VERSION = "v0.1.3";
 export const DEFAULT_EVENT_SOCKET = "/tmp/gongd.sock";
 export const DEFAULT_CONTROL_SOCKET = "/tmp/gongd.ctl.sock";
 

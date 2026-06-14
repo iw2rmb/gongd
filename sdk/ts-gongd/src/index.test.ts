@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { Client, DaemonError, VERSION } from "./index.js";
 
 test("version matches release tag", () => {
-  assert.equal(VERSION, "v0.1.1");
+  assert.equal(VERSION, "v0.1.3");
 });
 
 test("addWatch sends expected request", async () => {

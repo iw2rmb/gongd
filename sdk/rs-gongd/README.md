@@ -2,7 +2,7 @@
 
 `rs-gongd` is a small Rust SDK for `gongd`.
 
-Current release: `v0.1.1`.
+Current release: `v0.1.3`.
 
 It wraps the two daemon sockets:
 

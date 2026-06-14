@@ -2,7 +2,7 @@
 
 `ts-gongd` is a small TypeScript SDK for `gongd`.
 
-Current release: `v0.1.1`.
+Current release: `v0.1.3`.
 
 It wraps the two daemon sockets:
 

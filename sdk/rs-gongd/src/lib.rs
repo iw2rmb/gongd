@@ -9,7 +9,7 @@ pub use watch::{Reconnect, ReconnectEventStream, SubscriptionItem};
 
 pub const DEFAULT_EVENT_SOCKET: &str = "/tmp/gongd.sock";
 pub const DEFAULT_CONTROL_SOCKET: &str = "/tmp/gongd.ctl.sock";
-pub const VERSION: &str = "v0.1.1";
+pub const VERSION: &str = "v0.1.3";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn version_matches_release_tag() {
-        assert_eq!(VERSION, "v0.1.1");
+        assert_eq!(VERSION, "v0.1.3");
     }
 }
 

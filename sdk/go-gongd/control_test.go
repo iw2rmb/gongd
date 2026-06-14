@@ -47,7 +47,7 @@ func TestAddWatch(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	if Version != "v0.1.1" {
+	if Version != "v0.1.3" {
 		t.Fatalf("unexpected version: %q", Version)
 	}
 }
