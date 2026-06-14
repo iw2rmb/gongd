@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { Client, DaemonError, VERSION } from "./index.js";
 
 test("version matches release tag", () => {
-  assert.equal(VERSION, "v0.1.0");
+  assert.equal(VERSION, "v0.1.1");
 });
 
 test("addWatch sends expected request", async () => {
@@ -19,9 +19,9 @@ test("addWatch sends expected request", async () => {
       server.once("connection", (socket) => {
         collectOneLine(socket)
           .then((line) => {
-            const request = JSON.parse(line) as { op: string; repo: string };
+            const request = JSON.parse(line) as { op: string; folder: string };
             assert.equal(request.op, "add_watch");
-            assert.equal(request.repo, "/tmp/repo");
+            assert.equal(request.folder, "/tmp/folder");
             socket.end('{"ok":true,"message":"watch added"}\n');
             resolve();
           })
@@ -31,7 +31,7 @@ test("addWatch sends expected request", async () => {
 
     await listen(server, socketPath);
     const client = new Client({ controlSocket: socketPath });
-    const response = await client.addWatch("/tmp/repo");
+    const response = await client.addWatch("/tmp/folder");
 
     assert.equal(response.ok, true);
     assert.equal(response.message, "watch added");
@@ -42,21 +42,21 @@ test("addWatch sends expected request", async () => {
   }
 });
 
-test("listWatches returns repo list", async () => {
+test("listWatches returns folder list", async () => {
   const socketPath = await socketPathFor("ctl-list");
   const server = createServer((socket) => {
     void collectOneLine(socket).then((line) => {
       const request = JSON.parse(line) as { op: string };
       assert.equal(request.op, "list_watches");
-      socket.end('{"ok":true,"repos":["/tmp/a","/tmp/b"]}\n');
+      socket.end('{"ok":true,"folders":["/tmp/a","/tmp/b"]}\n');
     });
   });
 
   try {
     await listen(server, socketPath);
     const client = new Client({ controlSocket: socketPath });
-    const repos = await client.listWatches();
-    assert.deepEqual(repos, ["/tmp/a", "/tmp/b"]);
+    const folders = await client.listWatches();
+    assert.deepEqual(folders, ["/tmp/a", "/tmp/b"]);
   } finally {
     await closeServer(server);
     await cleanupSocket(socketPath);
@@ -67,9 +67,9 @@ test("removeWatch surfaces daemon error", async () => {
   const socketPath = await socketPathFor("ctl-remove");
   const server = createServer((socket) => {
     void collectOneLine(socket).then((line) => {
-      const request = JSON.parse(line) as { op: string; repo: string };
+      const request = JSON.parse(line) as { op: string; folder: string };
       assert.equal(request.op, "remove_watch");
-      assert.equal(request.repo, "/tmp/repo");
+      assert.equal(request.folder, "/tmp/folder");
       socket.end('{"ok":false,"error":"watch not found"}\n');
     });
   });
@@ -78,7 +78,7 @@ test("removeWatch surfaces daemon error", async () => {
     await listen(server, socketPath);
     const client = new Client({ controlSocket: socketPath });
     await assert.rejects(
-      () => client.removeWatch("/tmp/repo"),
+      () => client.removeWatch("/tmp/folder"),
       (error: unknown) =>
         error instanceof DaemonError && error.message === "watch not found"
     );
@@ -98,7 +98,7 @@ test("subscribe reconnects after stream EOF", async () => {
     await listen(listener, socketPath);
     listener.once("connection", (socket) => {
       socket.end(
-        '{"repo":"/tmp/repo","type":"file_modified","path":"main.go","git_path":null,"ts_unix_ms":1}\n'
+        '{"folder":"/tmp/folder","type":"file_modified","path":"main.go","git_path":null,"ts_unix_ms":1}\n'
       );
       ready.resolve();
     });
@@ -109,7 +109,7 @@ test("subscribe reconnects after stream EOF", async () => {
 
     listener = createServer((socket) => {
       socket.end(
-        '{"repo":"/tmp/repo","type":"repo_head_changed","path":null,"git_path":"HEAD","ts_unix_ms":2}\n'
+        '{"folder":"/tmp/folder","type":"git_head_changed","path":null,"git_path":"HEAD","ts_unix_ms":2}\n'
       );
     });
     await listen(listener, socketPath);
@@ -134,7 +134,7 @@ test("subscribe reconnects after stream EOF", async () => {
     if (second.done) {
       throw new Error("expected second event");
     }
-    assert.equal(second.value.type, "repo_head_changed");
+    assert.equal(second.value.type, "git_head_changed");
     assert.equal(second.value.git_path, "HEAD");
 
     await subscription.return(undefined);

@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-export const VERSION = "v0.1.0";
+export const VERSION = "v0.1.1";
 export const DEFAULT_EVENT_SOCKET = "/tmp/gongd.sock";
 export const DEFAULT_CONTROL_SOCKET = "/tmp/gongd.ctl.sock";
 
@@ -10,16 +10,17 @@ export type EventType =
   | "file_deleted"
   | "file_renamed"
   | "dir_created"
+  | "dir_modified"
   | "dir_deleted"
   | "dir_renamed"
-  | "repo_head_changed"
-  | "repo_index_changed"
-  | "repo_refs_changed"
-  | "repo_packed_refs_changed"
-  | "repo_changed";
+  | "git_head_changed"
+  | "git_index_changed"
+  | "git_refs_changed"
+  | "git_packed_refs_changed"
+  | "git_changed";
 
 export interface Event {
-  repo: string;
+  folder: string;
   type: EventType;
   path: string | null;
   git_path: string | null;
@@ -30,7 +31,7 @@ export interface ControlResponse {
   ok: boolean;
   message?: string;
   error?: string;
-  repos?: string[];
+  folders?: string[];
 }
 
 export interface ClientOptions {
@@ -42,7 +43,7 @@ export interface SubscribeOptions {
   signal?: AbortSignal;
 }
 
-type RepoControlOp = "add_watch" | "remove_watch";
+type FolderControlOp = "add_watch" | "remove_watch";
 
 const RECONNECT_DELAY_MS = 100;
 const RECONNECTABLE_SOCKET_ERRORS = new Set([
@@ -70,17 +71,17 @@ export class Client {
     this.controlSocket = options.controlSocket ?? DEFAULT_CONTROL_SOCKET;
   }
 
-  addWatch(repo: string, signal?: AbortSignal): Promise<ControlResponse> {
-    return this.sendRepoControl("add_watch", repo, signal);
+  addWatch(folder: string, signal?: AbortSignal): Promise<ControlResponse> {
+    return this.sendFolderControl("add_watch", folder, signal);
   }
 
-  removeWatch(repo: string, signal?: AbortSignal): Promise<ControlResponse> {
-    return this.sendRepoControl("remove_watch", repo, signal);
+  removeWatch(folder: string, signal?: AbortSignal): Promise<ControlResponse> {
+    return this.sendFolderControl("remove_watch", folder, signal);
   }
 
   async listWatches(signal?: AbortSignal): Promise<string[]> {
     const response = await this.sendControl({ op: "list_watches" }, signal);
-    return response.repos ?? [];
+    return response.folders ?? [];
   }
 
   async *subscribe(options: SubscribeOptions = {}): AsyncGenerator<Event> {
@@ -115,16 +116,16 @@ export class Client {
     }
   }
 
-  private sendRepoControl(
-    op: RepoControlOp,
-    repo: string,
+  private sendFolderControl(
+    op: FolderControlOp,
+    folder: string,
     signal?: AbortSignal
   ): Promise<ControlResponse> {
-    return this.sendControl({ op, repo }, signal);
+    return this.sendControl({ op, folder }, signal);
   }
 
   private async sendControl(
-    request: { op: string; repo?: string },
+    request: { op: string; folder?: string },
     signal?: AbortSignal
   ): Promise<ControlResponse> {
     const socket = await connectSocket(this.controlSocket, signal);

@@ -108,7 +108,7 @@ mod tests {
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .write_all(b"{\"repo\":\"/tmp/repo\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n")
+                .write_all(b"{\"folder\":\"/tmp/folder\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n")
                 .unwrap();
             drop(stream);
             drop(listener);
@@ -118,7 +118,7 @@ mod tests {
             ready_tx.send(()).unwrap();
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .write_all(b"{\"repo\":\"/tmp/repo\",\"type\":\"repo_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n")
+                .write_all(b"{\"folder\":\"/tmp/folder\",\"type\":\"git_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n")
                 .unwrap();
         });
 
@@ -131,7 +131,7 @@ mod tests {
 
         ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         let second = stream.next_event().unwrap().unwrap();
-        assert_eq!(second.event_type, EventType::RepoHeadChanged);
+        assert_eq!(second.event_type, EventType::GitHeadChanged);
         assert_eq!(second.git_path.as_deref(), Some("HEAD"));
         handle.join().unwrap();
     }

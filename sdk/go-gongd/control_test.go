@@ -29,7 +29,7 @@ func TestAddWatch(t *testing.T) {
 	client := NewClient()
 	client.ControlSocket = socket
 
-	response, err := client.AddWatch(context.Background(), "/tmp/repo")
+	response, err := client.AddWatch(context.Background(), "/tmp/folder")
 	if err != nil {
 		t.Fatalf("AddWatch: %v", err)
 	}
@@ -41,13 +41,13 @@ func TestAddWatch(t *testing.T) {
 	if request["op"] != "add_watch" {
 		t.Fatalf("unexpected op: %#v", request["op"])
 	}
-	if request["repo"] != "/tmp/repo" {
-		t.Fatalf("unexpected repo: %#v", request["repo"])
+	if request["folder"] != "/tmp/folder" {
+		t.Fatalf("unexpected folder: %#v", request["folder"])
 	}
 }
 
 func TestVersion(t *testing.T) {
-	if Version != "v0.1.0" {
+	if Version != "v0.1.1" {
 		t.Fatalf("unexpected version: %q", Version)
 	}
 }
@@ -61,19 +61,19 @@ func TestListWatches(t *testing.T) {
 	defer listener.Close()
 
 	go serveOneControlConn(t, listener, nil, ControlResponse{
-		OK:    true,
-		Repos: []string{"/tmp/a", "/tmp/b"},
+		OK:      true,
+		Folders: []string{"/tmp/a", "/tmp/b"},
 	})
 
 	client := NewClient()
 	client.ControlSocket = socket
 
-	repos, err := client.ListWatches(context.Background())
+	folders, err := client.ListWatches(context.Background())
 	if err != nil {
 		t.Fatalf("ListWatches: %v", err)
 	}
-	if len(repos) != 2 || repos[0] != "/tmp/a" || repos[1] != "/tmp/b" {
-		t.Fatalf("unexpected repos: %#v", repos)
+	if len(folders) != 2 || folders[0] != "/tmp/a" || folders[1] != "/tmp/b" {
+		t.Fatalf("unexpected folders: %#v", folders)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestRemoveWatchReturnsDaemonError(t *testing.T) {
 	client := NewClient()
 	client.ControlSocket = socket
 
-	_, err = client.RemoveWatch(context.Background(), "/tmp/repo")
+	_, err = client.RemoveWatch(context.Background(), "/tmp/folder")
 	if err == nil {
 		t.Fatal("expected error")
 	}

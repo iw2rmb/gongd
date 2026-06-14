@@ -2,7 +2,7 @@
 
 `go-gongd` is a small Go SDK for `gongd`.
 
-Current release: `v0.1.0`.
+Current release: `v0.1.1`.
 
 It wraps the two daemon sockets:
 
@@ -35,7 +35,7 @@ import (
 func main() {
 	client := gongd.NewClient()
 
-	if _, err := client.AddWatch(context.Background(), "/absolute/path/to/repo"); err != nil {
+	if _, err := client.AddWatch(context.Background(), "/absolute/path/to/folder"); err != nil {
 		panic(err)
 	}
 
@@ -43,7 +43,7 @@ func main() {
 	for {
 		select {
 		case event := <-events:
-			fmt.Println(event.Type, event.Repo, event.Path, event.GitPath)
+			fmt.Println(event.Type, event.Folder, event.Path, event.GitPath)
 		case err := <-errs:
 			panic(err)
 		}

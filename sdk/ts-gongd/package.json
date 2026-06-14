@@ -1,6 +1,6 @@
 {
   "name": "ts-gongd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK for gongd over Unix sockets",
   "license": "MIT",
   "type": "module",

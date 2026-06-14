@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GongdConfig {
     #[serde(default)]
-    pub repos: Vec<PathBuf>,
+    pub folders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ mod tests {
         let tmp = TestDir::new("gongd-config-roundtrip");
         let store = ConfigStore::new(tmp.path().join("gongd.json"));
         let config = GongdConfig {
-            repos: vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b")],
+            folders: vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b")],
         };
 
         store.save(&config).unwrap();

@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version              = "v0.1.0"
+	Version              = "v0.1.1"
 	DefaultEventSocket   = "/tmp/gongd.sock"
 	DefaultControlSocket = "/tmp/gongd.ctl.sock"
 )
@@ -15,7 +15,7 @@ type ControlResponse struct {
 	OK      bool     `json:"ok"`
 	Message *string  `json:"message,omitempty"`
 	Error   *string  `json:"error,omitempty"`
-	Repos   []string `json:"repos,omitempty"`
+	Folders []string `json:"folders,omitempty"`
 }
 
 type DaemonError struct {

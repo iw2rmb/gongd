@@ -94,7 +94,7 @@ pub fn write_file(path: &Path, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
-pub fn init_git_repo(path: &Path) {
+pub fn init_git_folder(path: &Path) {
     fs::create_dir_all(path).unwrap();
     let status = Command::new("git")
         .args(["init", "-q", path.to_str().unwrap()])

@@ -8,17 +8,17 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::{ConfigStore, GongdConfig},
-    repo::RepoState,
+    folder::MonitoredFolder,
 };
 
 #[derive(Debug, Clone)]
-pub struct ConfiguredRepo {
+pub struct ConfiguredFolder {
     pub original: PathBuf,
-    pub state: RepoState,
+    pub state: MonitoredFolder,
 }
 
-struct LoadedConfiguredRepos {
-    repos: Vec<ConfiguredRepo>,
+struct LoadedConfiguredFolders {
+    folders: Vec<ConfiguredFolder>,
     changed: bool,
 }
 
@@ -75,20 +75,20 @@ impl ConfigWatch {
             Err(err) => return Err(err),
         };
 
-        if config_exists && !config.repos.is_empty() {
+        if config_exists && !config.folders.is_empty() {
             return Ok(());
         }
 
-        let repos = load_configured_repos(self.startup_cli_inputs.clone());
-        if repos.repos.is_empty() {
+        let folders = load_configured_folders(self.startup_cli_inputs.clone());
+        if folders.folders.is_empty() {
             return Ok(());
         }
 
-        self.save_configured_repos(&repos.repos)
+        self.save_configured_folders(&folders.folders)
     }
 
-    pub fn load_repo_states_for_apply(&self) -> io::Result<Option<Vec<RepoState>>> {
-        let loaded = match self.load_configured_repos_snapshot() {
+    pub fn load_folder_states_for_apply(&self) -> io::Result<Option<Vec<MonitoredFolder>>> {
+        let loaded = match self.load_configured_folders_snapshot() {
             Ok(loaded) => loaded,
             Err(err) if err.kind() == io::ErrorKind::InvalidData => {
                 eprintln!("{err}");
@@ -98,31 +98,38 @@ impl ConfigWatch {
         };
 
         if loaded.changed {
-            self.save_configured_repos(&loaded.repos)?;
+            self.save_configured_folders(&loaded.folders)?;
         }
 
         Ok(Some(
-            loaded.repos.into_iter().map(|repo| repo.state).collect(),
+            loaded
+                .folders
+                .into_iter()
+                .map(|folder| folder.state)
+                .collect(),
         ))
     }
 
-    pub fn load_configured_repos_for_write(&self) -> io::Result<Vec<ConfiguredRepo>> {
-        let loaded = self.load_configured_repos_snapshot()?;
+    pub fn load_configured_folders_for_write(&self) -> io::Result<Vec<ConfiguredFolder>> {
+        let loaded = self.load_configured_folders_snapshot()?;
         if loaded.changed {
-            self.save_configured_repos(&loaded.repos)?;
+            self.save_configured_folders(&loaded.folders)?;
         }
-        Ok(loaded.repos)
+        Ok(loaded.folders)
     }
 
-    pub fn save_configured_repos(&self, repos: &[ConfiguredRepo]) -> io::Result<()> {
+    pub fn save_configured_folders(&self, folders: &[ConfiguredFolder]) -> io::Result<()> {
         self.store.save(&GongdConfig {
-            repos: repos.iter().map(|repo| repo.original.clone()).collect(),
+            folders: folders
+                .iter()
+                .map(|folder| folder.original.clone())
+                .collect(),
         })
     }
 
-    fn load_configured_repos_snapshot(&self) -> io::Result<LoadedConfiguredRepos> {
+    fn load_configured_folders_snapshot(&self) -> io::Result<LoadedConfiguredFolders> {
         let config = self.store.load()?;
-        Ok(load_configured_repos(config.repos))
+        Ok(load_configured_folders(config.folders))
     }
 }
 
@@ -144,9 +151,9 @@ fn start_config_watcher(
     Ok(watcher)
 }
 
-impl ConfiguredRepo {
+impl ConfiguredFolder {
     pub fn from_path(path: &Path) -> io::Result<Self> {
-        let state = RepoState::discover(path)?;
+        let state = MonitoredFolder::discover(path)?;
         Ok(Self {
             original: path.to_path_buf(),
             state,
@@ -158,24 +165,24 @@ impl ConfiguredRepo {
     }
 }
 
-fn load_configured_repos(paths: Vec<PathBuf>) -> LoadedConfiguredRepos {
-    let mut repos = Vec::new();
+fn load_configured_folders(paths: Vec<PathBuf>) -> LoadedConfiguredFolders {
+    let mut folders = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
 
     for original in &paths {
-        match ConfiguredRepo::from_path(original) {
-            Ok(repo) if !seen.insert(repo.state.root.clone()) => {}
-            Ok(repo) => repos.push(repo),
+        match ConfiguredFolder::from_path(original) {
+            Ok(folder) if !seen.insert(folder.state.root.clone()) => {}
+            Ok(folder) => folders.push(folder),
             Err(err) => eprintln!("skipping {}: {err}", original.display()),
         }
     }
 
-    let changed = repos
+    let changed = folders
         .iter()
-        .map(|repo| repo.original.clone())
+        .map(|folder| folder.original.clone())
         .collect::<Vec<_>>()
         != paths;
-    LoadedConfiguredRepos { repos, changed }
+    LoadedConfiguredFolders { folders, changed }
 }
 
 #[cfg(test)]
@@ -187,7 +194,7 @@ mod tests {
     use super::ConfigWatch;
     use crate::{
         config::{ConfigStore, GongdConfig},
-        test_support::{env_lock, init_git_repo, ScopedEnvVar, TestDir},
+        test_support::{env_lock, ScopedEnvVar, TestDir},
         watch::WatchManager,
     };
 
@@ -195,33 +202,36 @@ mod tests {
     async fn config_reload_dedupes_by_resolved_path_and_keeps_first_original() {
         let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-config-home");
-        let repo = home.path().join("repo");
-        init_git_repo(&repo);
-        let repo_root = std::fs::canonicalize(&repo).unwrap();
+        let folder = home.path().join("folder");
+        std::fs::create_dir_all(&folder).unwrap();
+        let folder_root = std::fs::canonicalize(&folder).unwrap();
         let _home = ScopedEnvVar::set("HOME", home.path());
 
         let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
         store
             .save(&GongdConfig {
-                repos: vec![PathBuf::from("~/repo"), repo_root.clone()],
+                folders: vec![PathBuf::from("~/folder"), folder_root.clone()],
             })
             .unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
-        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
+        let folders = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(folders.clone(), raw_tx, Vec::new(), store.clone());
 
         manager.initialize().await.unwrap();
 
-        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
         assert_eq!(
-            repos
+            store.load().unwrap().folders,
+            vec![PathBuf::from("~/folder")]
+        );
+        assert_eq!(
+            folders
                 .read()
                 .await
                 .iter()
-                .map(|repo| repo.root.clone())
+                .map(|folder| folder.root.clone())
                 .collect::<Vec<_>>(),
-            vec![repo_root]
+            vec![folder_root]
         );
     }
 
@@ -229,15 +239,18 @@ mod tests {
     fn seed_from_cli_keeps_original_paths() {
         let _guard = env_lock().blocking_lock();
         let home = TestDir::new("gongd-config-seed-home");
-        let repo = home.path().join("repo");
-        init_git_repo(&repo);
+        let folder = home.path().join("folder");
+        std::fs::create_dir_all(&folder).unwrap();
         let _home = ScopedEnvVar::set("HOME", home.path());
 
         let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
-        let config_watch = ConfigWatch::new(store.clone(), vec![PathBuf::from("~/repo")]);
+        let config_watch = ConfigWatch::new(store.clone(), vec![PathBuf::from("~/folder")]);
 
         config_watch.seed_from_cli_if_needed().unwrap();
 
-        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
+        assert_eq!(
+            store.load().unwrap().folders,
+            vec![PathBuf::from("~/folder")]
+        );
     }
 }

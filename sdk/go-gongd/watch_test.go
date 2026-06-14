@@ -26,7 +26,7 @@ func TestSubscribeReconnectsAfterServiceReload(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_, _ = conn.Write([]byte("{\"repo\":\"/tmp/repo\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n"))
+		_, _ = conn.Write([]byte("{\"folder\":\"/tmp/folder\",\"type\":\"file_modified\",\"path\":\"main.go\",\"git_path\":null,\"ts_unix_ms\":1}\n"))
 		_ = conn.Close()
 		_ = listener.Close()
 		_ = os.Remove(socket)
@@ -44,7 +44,7 @@ func TestSubscribeReconnectsAfterServiceReload(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		_, _ = conn.Write([]byte("{\"repo\":\"/tmp/repo\",\"type\":\"repo_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n"))
+		_, _ = conn.Write([]byte("{\"folder\":\"/tmp/folder\",\"type\":\"git_head_changed\",\"path\":null,\"git_path\":\"HEAD\",\"ts_unix_ms\":2}\n"))
 	}()
 
 	client := NewClient()
@@ -68,7 +68,7 @@ func TestSubscribeReconnectsAfterServiceReload(t *testing.T) {
 	if first.Path == nil || *first.Path != "main.go" {
 		t.Fatalf("unexpected first path: %#v", first.Path)
 	}
-	if second.Type != EventRepoHeadChanged {
+	if second.Type != EventGitHeadChanged {
 		t.Fatalf("unexpected second event: %#v", second)
 	}
 	if second.GitPath == nil || *second.GitPath != "HEAD" {

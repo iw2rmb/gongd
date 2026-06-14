@@ -9,9 +9,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repo": {
+        "folder": {
           "type": "string",
-          "description": "Absolute path to the watched repository root.",
+          "description": "Absolute path to the watched folder root.",
           "minLength": 1
         },
         "type": {
@@ -22,13 +22,14 @@
             "file_deleted",
             "file_renamed",
             "dir_created",
+            "dir_modified",
             "dir_deleted",
             "dir_renamed"
           ]
         },
         "path": {
           "type": "string",
-          "description": "Path relative to the repository root. Rename events use the current 'from -> to' string payload.",
+          "description": "Path relative to the folder root. Rename events use the current 'from -> to' string payload.",
           "minLength": 1
         },
         "git_path": {
@@ -42,7 +43,7 @@
         }
       },
       "required": [
-        "repo",
+        "folder",
         "type",
         "path",
         "git_path",
@@ -54,19 +55,19 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repo": {
+        "folder": {
           "type": "string",
-          "description": "Absolute path to the watched repository root.",
+          "description": "Absolute path to the watched folder root.",
           "minLength": 1
         },
         "type": {
           "type": "string",
           "enum": [
-            "repo_head_changed",
-            "repo_index_changed",
-            "repo_refs_changed",
-            "repo_packed_refs_changed",
-            "repo_changed"
+            "git_head_changed",
+            "git_index_changed",
+            "git_refs_changed",
+            "git_packed_refs_changed",
+            "git_changed"
           ]
         },
         "path": {
@@ -75,7 +76,7 @@
         },
         "git_path": {
           "type": "string",
-          "description": "Path relative to the repository .git directory.",
+          "description": "Path relative to the folder .git directory.",
           "minLength": 1
         },
         "ts_unix_ms": {
@@ -85,7 +86,7 @@
         }
       },
       "required": [
-        "repo",
+        "folder",
         "type",
         "path",
         "git_path",

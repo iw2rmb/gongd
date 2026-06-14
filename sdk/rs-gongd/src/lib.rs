@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_EVENT_SOCKET: &str = "/tmp/gongd.sock";
 pub const DEFAULT_CONTROL_SOCKET: &str = "/tmp/gongd.ctl.sock";
-pub const VERSION: &str = "v0.1.0";
+pub const VERSION: &str = "v0.1.1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Event {
-    pub repo: String,
+    pub folder: String,
     #[serde(rename = "type")]
     pub event_type: EventType,
     pub path: Option<String>,
@@ -28,13 +28,14 @@ pub enum EventType {
     FileDeleted,
     FileRenamed,
     DirCreated,
+    DirModified,
     DirDeleted,
     DirRenamed,
-    RepoHeadChanged,
-    RepoIndexChanged,
-    RepoRefsChanged,
-    RepoPackedRefsChanged,
-    RepoChanged,
+    GitHeadChanged,
+    GitIndexChanged,
+    GitRefsChanged,
+    GitPackedRefsChanged,
+    GitChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +46,7 @@ pub struct ControlResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repos: Option<Vec<String>>,
+    pub folders: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -116,7 +117,7 @@ mod tests {
 
     #[test]
     fn version_matches_release_tag() {
-        assert_eq!(VERSION, "v0.1.0");
+        assert_eq!(VERSION, "v0.1.1");
     }
 }
 

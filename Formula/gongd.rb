@@ -2,7 +2,7 @@ class Gongd < Formula
   desc "Git-aware local filesystem event daemon over Unix sockets"
   homepage "https://github.com/iw2rmb/gongd"
   url "https://github.com/iw2rmb/gongd.git",
-      tag: "v0.1.0"
+      tag: "v0.1.1"
   license "MIT"
   head "https://github.com/iw2rmb/gongd.git", branch: "main"
 

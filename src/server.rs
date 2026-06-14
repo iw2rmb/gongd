@@ -114,8 +114,10 @@ async fn handle_control_client(
 
     let (respond_to, response_rx) = oneshot::channel();
     let request = match request {
-        ControlRequest::AddWatch { repo } => ManagerRequest::AddWatch { repo, respond_to },
-        ControlRequest::RemoveWatch { repo } => ManagerRequest::RemoveWatch { repo, respond_to },
+        ControlRequest::AddWatch { folder } => ManagerRequest::AddWatch { folder, respond_to },
+        ControlRequest::RemoveWatch { folder } => {
+            ManagerRequest::RemoveWatch { folder, respond_to }
+        }
         ControlRequest::ListWatches => ManagerRequest::ListWatches { respond_to },
     };
 
@@ -162,22 +164,22 @@ mod tests {
     use crate::{
         config::ConfigStore,
         protocol::ControlResponse,
-        test_support::{init_git_repo, unique_suffix, wait_for_socket, TestDir},
+        test_support::{unique_suffix, wait_for_socket, TestDir},
         watch::WatchManager,
     };
 
     #[tokio::test]
     async fn control_socket_adds_lists_and_removes_watches() {
         let tmp = TestDir::new("gongd-control-socket");
-        let repo = tmp.path().join("repo");
+        let folder = tmp.path().join("folder");
         let control_socket = short_socket_path("ctl");
-        init_git_repo(&repo);
-        let repo_root = std::fs::canonicalize(&repo).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        let folder_root = std::fs::canonicalize(&folder).unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(32);
-        let repos = Arc::new(RwLock::new(Vec::new()));
+        let folders = Arc::new(RwLock::new(Vec::new()));
         let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
-        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
+        let mut manager = WatchManager::new(folders.clone(), raw_tx, Vec::new(), store.clone());
         manager.initialize().await.unwrap();
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
@@ -188,23 +190,23 @@ mod tests {
 
         let add = send_request(
             &control_socket,
-            &format!(r#"{{"op":"add_watch","repo":"{}"}}"#, repo.display()),
+            &format!(r#"{{"op":"add_watch","folder":"{}"}}"#, folder.display()),
         )
         .await;
         assert!(add.ok);
 
-        wait_for_repos(&control_socket, vec![repo_root.display().to_string()]).await;
+        wait_for_folders(&control_socket, vec![folder_root.display().to_string()]).await;
 
         let remove = send_request(
             &control_socket,
-            &format!(r#"{{"op":"remove_watch","repo":"{}"}}"#, repo.display()),
+            &format!(r#"{{"op":"remove_watch","folder":"{}"}}"#, folder.display()),
         )
         .await;
         assert!(remove.ok);
 
-        wait_for_repos(&control_socket, Vec::new()).await;
+        wait_for_folders(&control_socket, Vec::new()).await;
         assert_eq!(
-            store.load().unwrap().repos,
+            store.load().unwrap().folders,
             Vec::<std::path::PathBuf>::new()
         );
 
@@ -256,10 +258,10 @@ mod tests {
         serde_json::from_str(line.trim()).unwrap()
     }
 
-    async fn wait_for_repos(socket: &Path, expected: Vec<String>) {
+    async fn wait_for_folders(socket: &Path, expected: Vec<String>) {
         for _ in 0..100 {
             let response = send_request(socket, r#"{"op":"list_watches"}"#).await;
-            if response.repos == Some(expected.clone()) {
+            if response.folders == Some(expected.clone()) {
                 return;
             }
             sleep(Duration::from_millis(10)).await;

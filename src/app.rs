@@ -8,9 +8,9 @@ use crate::{
     args::Args,
     config::ConfigStore,
     event::{translate_event, Deduper, SharedDeduper},
-    repo::RepoState,
+    folder::MonitoredFolder,
     server::{control_socket_server, event_socket_server, prepare_socket_path},
-    watch::{ManagerRequest, RawEvent, SharedRepos, WatchManager},
+    watch::{ManagerRequest, RawEvent, SharedFolders, WatchManager},
 };
 
 pub async fn run(args: Args) -> io::Result<()> {
@@ -28,13 +28,13 @@ pub async fn run(args: Args) -> io::Result<()> {
 
     let (raw_tx, mut raw_rx) = mpsc::channel(1024);
     let (broadcast_tx, _) = broadcast::channel::<String>(4096);
-    let repos: SharedRepos = Arc::new(RwLock::new(Vec::new()));
+    let folders: SharedFolders = Arc::new(RwLock::new(Vec::new()));
     let deduper: SharedDeduper = Arc::new(Mutex::new(Deduper::new(Duration::from_millis(
         args.debounce_ms,
     ))));
     let (manager_tx, manager_rx) = mpsc::channel::<ManagerRequest>(128);
 
-    let mut manager = WatchManager::new(repos.clone(), raw_tx, args.repos, config_store);
+    let mut manager = WatchManager::new(folders.clone(), raw_tx, args.folders, config_store);
     manager.initialize().await?;
 
     let event_socket = args.socket.clone();
@@ -56,7 +56,7 @@ pub async fn run(args: Args) -> io::Result<()> {
     tokio::spawn(manager.run(manager_rx));
 
     while let Some(msg) = raw_rx.recv().await {
-        let snapshot = repos.read().await.clone();
+        let snapshot = folders.read().await.clone();
         remove_missing_watches(&manager_tx, &snapshot, &msg).await;
 
         match msg {
@@ -80,25 +80,25 @@ pub async fn run(args: Args) -> io::Result<()> {
 
 async fn remove_missing_watches(
     manager_tx: &mpsc::Sender<ManagerRequest>,
-    repos: &[RepoState],
+    folders: &[MonitoredFolder],
     event: &RawEvent,
 ) {
     if !should_prune_missing_watches(event) {
         return;
     }
 
-    let missing_roots: Vec<_> = repos
+    let missing_roots: Vec<_> = folders
         .iter()
-        .filter(|repo| !repo.root.exists() || !repo.git_dir.exists())
-        .map(|repo| repo.root.clone())
+        .filter(|folder| !folder.root.is_dir())
+        .map(|folder| folder.root.clone())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
 
-    for repo in missing_roots {
+    for folder in missing_roots {
         let (respond_to, response_rx) = oneshot::channel();
         if manager_tx
-            .send(ManagerRequest::RemoveWatch { repo, respond_to })
+            .send(ManagerRequest::RemoveWatch { folder, respond_to })
             .await
             .is_err()
         {
@@ -129,57 +129,70 @@ mod tests {
     use super::remove_missing_watches;
     use crate::{
         config::ConfigStore,
-        test_support::{init_git_repo, wait_for, TestDir},
+        test_support::{init_git_folder, wait_for, TestDir},
         watch::WatchManager,
     };
 
     #[tokio::test]
-    async fn remove_missing_watches_persists_deleted_repo() {
-        let tmp = TestDir::new("gongd-app-missing-watch");
-        let repo = tmp.path().join("repo");
-        init_git_repo(&repo);
-        let repo_root = std::fs::canonicalize(&repo).unwrap();
+    async fn remove_missing_watches_prunes_only_missing_roots() {
+        for (case, remove_git_dir, expected_config_empty) in [
+            ("missing-root", false, true),
+            ("missing-git-dir", true, false),
+        ] {
+            let tmp = TestDir::new(&format!("gongd-app-{case}"));
+            let folder = tmp.path().join("folder");
+            init_git_folder(&folder);
+            let folder_root = std::fs::canonicalize(&folder).unwrap();
 
-        let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
-        let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
+            let (raw_tx, _raw_rx) = mpsc::channel(16);
+            let folders = Arc::new(RwLock::new(Vec::new()));
+            let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
 
-        let mut manager =
-            WatchManager::new(repos.clone(), raw_tx, vec![repo.clone()], store.clone());
-        manager.initialize().await.unwrap();
+            let mut manager =
+                WatchManager::new(folders.clone(), raw_tx, vec![folder.clone()], store.clone());
+            manager.initialize().await.unwrap();
 
-        let (manager_tx, manager_rx) = mpsc::channel(16);
-        let manager_handle = tokio::spawn(manager.run(manager_rx));
+            let (manager_tx, manager_rx) = mpsc::channel(16);
+            let manager_handle = tokio::spawn(manager.run(manager_rx));
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![repo.clone()])).await;
-        wait_for(|| {
-            repos
-                .try_read()
-                .map(|repos| repos.iter().any(|repo| repo.root == repo_root))
-                .unwrap_or(false)
-        })
-        .await;
+            wait_for(|| {
+                store.load().ok().map(|config| config.folders) == Some(vec![folder.clone()])
+            })
+            .await;
+            wait_for(|| {
+                folders
+                    .try_read()
+                    .map(|folders| folders.iter().any(|folder| folder.root == folder_root))
+                    .unwrap_or(false)
+            })
+            .await;
 
-        fs::remove_dir_all(&repo_root).unwrap();
+            if remove_git_dir {
+                fs::remove_dir_all(folder_root.join(".git")).unwrap();
+            } else {
+                fs::remove_dir_all(&folder_root).unwrap();
+            }
 
-        let event = Ok(Event {
-            kind: EventKind::Remove(RemoveKind::Folder),
-            paths: vec![repo_root.clone()],
-            attrs: EventAttributes::default(),
-        });
-        let snapshot = repos.read().await.clone();
-        remove_missing_watches(&manager_tx, &snapshot, &event).await;
+            let event = Ok(Event {
+                kind: EventKind::Remove(RemoveKind::Folder),
+                paths: vec![folder_root.clone()],
+                attrs: EventAttributes::default(),
+            });
+            let snapshot = folders.read().await.clone();
+            remove_missing_watches(&manager_tx, &snapshot, &event).await;
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(Vec::new())).await;
-        wait_for(|| {
-            repos
-                .try_read()
-                .map(|repos| repos.is_empty())
-                .unwrap_or(false)
-        })
-        .await;
+            let expected_config = if expected_config_empty {
+                Vec::new()
+            } else {
+                vec![folder.clone()]
+            };
+            wait_for(|| {
+                store.load().ok().map(|config| config.folders) == Some(expected_config.clone())
+            })
+            .await;
 
-        manager_handle.abort();
-        let _ = manager_handle.await;
+            manager_handle.abort();
+            let _ = manager_handle.await;
+        }
     }
 }

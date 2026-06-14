@@ -2,7 +2,7 @@
 
 `ts-gongd` is a small TypeScript SDK for `gongd`.
 
-Current release: `v0.1.0`.
+Current release: `v0.1.1`.
 
 It wraps the two daemon sockets:
 
@@ -27,11 +27,11 @@ import { Client } from "ts-gongd";
 
 const client = new Client();
 
-await client.addWatch("/absolute/path/to/repo");
+await client.addWatch("/absolute/path/to/folder");
 
 const abort = new AbortController();
 
 for await (const event of client.subscribe({ signal: abort.signal })) {
-  console.log(event.type, event.repo, event.path, event.git_path);
+  console.log(event.type, event.folder, event.path, event.git_path);
 }
 ```

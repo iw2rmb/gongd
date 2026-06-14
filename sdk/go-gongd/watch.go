@@ -17,22 +17,23 @@ const reconnectDelay = 100 * time.Millisecond
 type EventType string
 
 const (
-	EventFileCreated           EventType = "file_created"
-	EventFileModified          EventType = "file_modified"
-	EventFileDeleted           EventType = "file_deleted"
-	EventFileRenamed           EventType = "file_renamed"
-	EventDirCreated            EventType = "dir_created"
-	EventDirDeleted            EventType = "dir_deleted"
-	EventDirRenamed            EventType = "dir_renamed"
-	EventRepoHeadChanged       EventType = "repo_head_changed"
-	EventRepoIndexChanged      EventType = "repo_index_changed"
-	EventRepoRefsChanged       EventType = "repo_refs_changed"
-	EventRepoPackedRefsChanged EventType = "repo_packed_refs_changed"
-	EventRepoChanged           EventType = "repo_changed"
+	EventFileCreated          EventType = "file_created"
+	EventFileModified         EventType = "file_modified"
+	EventFileDeleted          EventType = "file_deleted"
+	EventFileRenamed          EventType = "file_renamed"
+	EventDirCreated           EventType = "dir_created"
+	EventDirModified          EventType = "dir_modified"
+	EventDirDeleted           EventType = "dir_deleted"
+	EventDirRenamed           EventType = "dir_renamed"
+	EventGitHeadChanged       EventType = "git_head_changed"
+	EventGitIndexChanged      EventType = "git_index_changed"
+	EventGitRefsChanged       EventType = "git_refs_changed"
+	EventGitPackedRefsChanged EventType = "git_packed_refs_changed"
+	EventGitChanged           EventType = "git_changed"
 )
 
 type Event struct {
-	Repo     string    `json:"repo"`
+	Folder   string    `json:"folder"`
 	Type     EventType `json:"type"`
 	Path     *string   `json:"path"`
 	GitPath  *string   `json:"git_path"`

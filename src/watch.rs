@@ -9,21 +9,21 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::{
     config::ConfigStore,
+    folder::{normalize_folder_root, MonitoredFolder},
     protocol::ControlResponse,
-    repo::{normalize_repo_root, RepoState},
-    watch_config::{ConfigWatch, ConfiguredRepo},
+    watch_config::{ConfigWatch, ConfiguredFolder},
 };
 
 pub type RawEvent = notify::Result<Event>;
-pub type SharedRepos = std::sync::Arc<RwLock<Vec<RepoState>>>;
+pub type SharedFolders = std::sync::Arc<RwLock<Vec<MonitoredFolder>>>;
 
 pub enum ManagerRequest {
     AddWatch {
-        repo: PathBuf,
+        folder: PathBuf,
         respond_to: oneshot::Sender<ControlResponse>,
     },
     RemoveWatch {
-        repo: PathBuf,
+        folder: PathBuf,
         respond_to: oneshot::Sender<ControlResponse>,
     },
     ListWatches {
@@ -32,20 +32,20 @@ pub enum ManagerRequest {
 }
 
 struct WatchRegistration {
-    state: RepoState,
+    state: MonitoredFolder,
     _watcher: RecommendedWatcher,
 }
 
 pub struct WatchManager {
     watchers: BTreeMap<PathBuf, WatchRegistration>,
-    repos: SharedRepos,
+    folders: SharedFolders,
     raw_tx: mpsc::Sender<RawEvent>,
     config_watch: ConfigWatch,
 }
 
 impl WatchManager {
     pub fn new(
-        repos: SharedRepos,
+        folders: SharedFolders,
         raw_tx: mpsc::Sender<RawEvent>,
         startup_cli_inputs: Vec<PathBuf>,
         config_store: ConfigStore,
@@ -53,7 +53,7 @@ impl WatchManager {
         let config_watch = ConfigWatch::new(config_store, startup_cli_inputs);
         Self {
             watchers: BTreeMap::new(),
-            repos,
+            folders,
             raw_tx,
             config_watch,
         }
@@ -82,11 +82,11 @@ impl WatchManager {
 
     fn handle_request(&mut self, request: ManagerRequest) {
         match request {
-            ManagerRequest::AddWatch { repo, respond_to } => {
-                let _ = respond_to.send(self.add_watch(&repo));
+            ManagerRequest::AddWatch { folder, respond_to } => {
+                let _ = respond_to.send(self.add_watch(&folder));
             }
-            ManagerRequest::RemoveWatch { repo, respond_to } => {
-                let _ = respond_to.send(self.remove_watch(&repo));
+            ManagerRequest::RemoveWatch { folder, respond_to } => {
+                let _ = respond_to.send(self.remove_watch(&folder));
             }
             ManagerRequest::ListWatches { respond_to } => {
                 let _ = respond_to.send(self.list_watches());
@@ -94,28 +94,28 @@ impl WatchManager {
         }
     }
 
-    fn add_watch(&mut self, repo: &Path) -> ControlResponse {
-        respond(self.try_add_watch(repo))
+    fn add_watch(&mut self, folder: &Path) -> ControlResponse {
+        respond(self.try_add_watch(folder))
     }
 
-    fn remove_watch(&mut self, repo: &Path) -> ControlResponse {
-        respond(self.try_remove_watch(repo))
+    fn remove_watch(&mut self, folder: &Path) -> ControlResponse {
+        respond(self.try_remove_watch(folder))
     }
 
     fn list_watches(&self) -> ControlResponse {
         ControlResponse::list(self.watchers.keys().cloned().collect())
     }
 
-    fn try_add_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
-        let repo = ConfiguredRepo::from_path(repo)?;
-        let inserted = self.persist_repos(|repos| {
-            if repos
+    fn try_add_watch(&self, folder: &Path) -> io::Result<ControlResponse> {
+        let folder = ConfiguredFolder::from_path(folder)?;
+        let inserted = self.persist_folders(|folders| {
+            if folders
                 .iter()
-                .any(|existing| existing.resolved() == repo.resolved())
+                .any(|existing| existing.resolved() == folder.resolved())
             {
                 Ok(false)
             } else {
-                repos.push(repo.clone());
+                folders.push(folder.clone());
                 Ok(true)
             }
         })?;
@@ -123,21 +123,21 @@ impl WatchManager {
         Ok(if inserted {
             ControlResponse::success_message(format!(
                 "watch added for {}",
-                repo.resolved().display()
+                folder.resolved().display()
             ))
         } else {
             ControlResponse::success_message(format!(
                 "watch already configured for {}",
-                repo.resolved().display()
+                folder.resolved().display()
             ))
         })
     }
 
-    fn try_remove_watch(&self, repo: &Path) -> io::Result<ControlResponse> {
-        let root = normalize_repo_root(repo)?;
-        self.persist_repos(|repos| {
-            if let Some(index) = repos.iter().position(|repo| repo.resolved() == root) {
-                repos.remove(index);
+    fn try_remove_watch(&self, folder: &Path) -> io::Result<ControlResponse> {
+        let root = normalize_folder_root(folder)?;
+        self.persist_folders(|folders| {
+            if let Some(index) = folders.iter().position(|folder| folder.resolved() == root) {
+                folders.remove(index);
                 Ok(())
             } else {
                 Err(io::Error::new(
@@ -153,64 +153,66 @@ impl WatchManager {
         )))
     }
 
-    fn persist_repos<T>(
+    fn persist_folders<T>(
         &self,
-        mutate: impl FnOnce(&mut Vec<ConfiguredRepo>) -> io::Result<T>,
+        mutate: impl FnOnce(&mut Vec<ConfiguredFolder>) -> io::Result<T>,
     ) -> io::Result<T> {
-        let mut repos = self.config_watch.load_configured_repos_for_write()?;
-        let result = mutate(&mut repos)?;
-        self.config_watch.save_configured_repos(&repos)?;
+        let mut folders = self.config_watch.load_configured_folders_for_write()?;
+        let result = mutate(&mut folders)?;
+        self.config_watch.save_configured_folders(&folders)?;
         Ok(result)
     }
 
     async fn reload_config_from_disk(&mut self) -> io::Result<()> {
-        let Some(repos) = self.config_watch.load_repo_states_for_apply()? else {
+        let Some(folders) = self.config_watch.load_folder_states_for_apply()? else {
             return Ok(());
         };
 
-        self.reconcile_watches(repos).await;
+        self.reconcile_watches(folders).await;
         Ok(())
     }
 
-    async fn reconcile_watches(&mut self, desired_repos: Vec<RepoState>) {
-        let desired_roots: BTreeSet<PathBuf> =
-            desired_repos.iter().map(|repo| repo.root.clone()).collect();
+    async fn reconcile_watches(&mut self, desired_folders: Vec<MonitoredFolder>) {
+        let desired_roots: BTreeSet<PathBuf> = desired_folders
+            .iter()
+            .map(|folder| folder.root.clone())
+            .collect();
 
         self.watchers.retain(|root, _| desired_roots.contains(root));
 
-        for repo in desired_repos {
-            if let Err(err) = self.ensure_active(repo.clone()) {
-                eprintln!("failed to watch {}: {err}", repo.root.display());
+        for folder in desired_folders {
+            if let Err(err) = self.ensure_active(folder.clone()) {
+                eprintln!("failed to watch {}: {err}", folder.root.display());
             }
         }
 
-        self.sync_shared_repos().await;
+        self.sync_shared_folders().await;
     }
 
-    fn ensure_active(&mut self, repo: RepoState) -> NotifyResult<()> {
-        if self.watchers.contains_key(&repo.root) {
+    fn ensure_active(&mut self, folder: MonitoredFolder) -> NotifyResult<()> {
+        if self.watchers.contains_key(&folder.root) {
             return Ok(());
         }
 
-        let watcher = start_repo_watcher(&repo, self.raw_tx.clone())?;
+        let watcher = start_folder_watcher(&folder, self.raw_tx.clone())?;
         self.watchers.insert(
-            repo.root.clone(),
+            folder.root.clone(),
             WatchRegistration {
-                state: repo,
+                state: folder,
                 _watcher: watcher,
             },
         );
         Ok(())
     }
 
-    async fn sync_shared_repos(&self) {
-        let mut repos = self.repos.write().await;
-        *repos = self
+    async fn sync_shared_folders(&self) {
+        let mut folders = self.folders.write().await;
+        *folders = self
             .watchers
             .values()
             .map(|registration| registration.state.clone())
             .collect();
-        repos.sort_by(|left, right| left.root.cmp(&right.root));
+        folders.sort_by(|left, right| left.root.cmp(&right.root));
     }
 }
 
@@ -218,8 +220,8 @@ fn respond(result: io::Result<ControlResponse>) -> ControlResponse {
     result.unwrap_or_else(|err| ControlResponse::error(err.to_string()))
 }
 
-fn start_repo_watcher(
-    repo: &RepoState,
+fn start_folder_watcher(
+    folder: &MonitoredFolder,
     tx: mpsc::Sender<RawEvent>,
 ) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
@@ -229,88 +231,98 @@ fn start_repo_watcher(
         Config::default(),
     )?;
 
-    watcher.watch(&repo.root, RecursiveMode::Recursive)?;
-    watcher.watch(&repo.git_dir, RecursiveMode::Recursive)?;
+    watcher.watch(&folder.root, RecursiveMode::Recursive)?;
+    if let Some(git_dir) = folder.git_dir() {
+        watcher.watch(git_dir, RecursiveMode::Recursive)?;
+    }
     Ok(watcher)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::{fs, path::PathBuf, sync::Arc};
 
     use tokio::sync::{mpsc, oneshot, RwLock};
 
     use super::{ManagerRequest, WatchManager};
     use crate::{
         config::{ConfigStore, GongdConfig},
-        test_support::{env_lock, init_git_repo, wait_for, ScopedEnvVar, TestDir},
+        test_support::{env_lock, wait_for, ScopedEnvVar, TestDir},
     };
 
     #[tokio::test]
     async fn startup_seed_and_control_requests_flow_through_config_reload() {
         let tmp = TestDir::new("gongd-watch-manager");
-        let cli_repo = tmp.path().join("cli");
-        let added_repo = tmp.path().join("added");
-        init_git_repo(&cli_repo);
-        init_git_repo(&added_repo);
-        let cli_root = std::fs::canonicalize(&cli_repo).unwrap();
-        let added_root = std::fs::canonicalize(&added_repo).unwrap();
+        let cli_folder = tmp.path().join("cli");
+        let added_folder = tmp.path().join("added");
+        fs::create_dir_all(&cli_folder).unwrap();
+        fs::create_dir_all(&added_folder).unwrap();
+        let cli_root = std::fs::canonicalize(&cli_folder).unwrap();
+        let added_root = std::fs::canonicalize(&added_folder).unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
+        let folders = Arc::new(RwLock::new(Vec::new()));
         let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
 
-        let mut manager =
-            WatchManager::new(repos.clone(), raw_tx, vec![cli_repo.clone()], store.clone());
+        let mut manager = WatchManager::new(
+            folders.clone(),
+            raw_tx,
+            vec![cli_folder.clone()],
+            store.clone(),
+        );
         manager.initialize().await.unwrap();
 
         let (manager_tx, manager_rx) = mpsc::channel(16);
         let manager_handle = tokio::spawn(manager.run(manager_rx));
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![cli_repo.clone()]))
-            .await;
         wait_for(|| {
-            repos
+            store.load().ok().map(|config| config.folders) == Some(vec![cli_folder.clone()])
+        })
+        .await;
+        wait_for(|| {
+            folders
                 .try_read()
-                .map(|repos| repos.iter().any(|repo| repo.root == cli_root))
+                .map(|folders| folders.iter().any(|folder| folder.root == cli_root))
                 .unwrap_or(false)
         })
         .await;
 
         let add_response = send_watch_request(&manager_tx, |respond_to| ManagerRequest::AddWatch {
-            repo: added_repo.clone(),
+            folder: added_folder.clone(),
             respond_to,
         })
         .await;
         assert!(add_response.ok);
 
         wait_for(|| {
-            store.load().ok().map(|config| config.repos)
-                == Some(vec![cli_repo.clone(), added_repo.clone()])
+            store.load().ok().map(|config| config.folders)
+                == Some(vec![cli_folder.clone(), added_folder.clone()])
         })
         .await;
         wait_for(|| {
-            repos
+            folders
                 .try_read()
-                .map(|repos| repos.iter().any(|repo| repo.root == added_root))
+                .map(|folders| folders.iter().any(|folder| folder.root == added_root))
                 .unwrap_or(false)
         })
         .await;
 
         let remove_response =
             send_watch_request(&manager_tx, |respond_to| ManagerRequest::RemoveWatch {
-                repo: cli_repo.clone(),
+                folder: cli_folder.clone(),
                 respond_to,
             })
             .await;
         assert!(remove_response.ok);
 
-        wait_for(|| store.load().ok().map(|config| config.repos) == Some(vec![added_repo.clone()]))
-            .await;
         wait_for(|| {
-            repos
+            store.load().ok().map(|config| config.folders) == Some(vec![added_folder.clone()])
+        })
+        .await;
+        wait_for(|| {
+            folders
                 .try_read()
-                .map(|repos| repos.iter().all(|repo| repo.root != cli_root))
+                .map(|folders| folders.iter().all(|folder| folder.root != cli_root))
                 .unwrap_or(false)
         })
         .await;
@@ -319,33 +331,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialize_prunes_missing_repos_from_config() {
+    async fn initialize_prunes_missing_folders_from_config() {
         let tmp = TestDir::new("gongd-watch-manager-prune");
-        let present_repo = tmp.path().join("present");
-        let missing_repo = tmp.path().join("missing");
-        init_git_repo(&present_repo);
-        let present_root = std::fs::canonicalize(&present_repo).unwrap();
+        let present_folder = tmp.path().join("present");
+        let missing_folder = tmp.path().join("missing");
+        fs::create_dir_all(&present_folder).unwrap();
+        let present_root = std::fs::canonicalize(&present_folder).unwrap();
 
         let store = ConfigStore::new(tmp.path().join(".gong").join("config.json"));
         store
             .save(&GongdConfig {
-                repos: vec![missing_repo, present_repo.clone()],
+                folders: vec![missing_folder, present_folder.clone()],
             })
             .unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
-        let mut manager = WatchManager::new(repos.clone(), raw_tx, Vec::new(), store.clone());
+        let folders = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(folders.clone(), raw_tx, Vec::new(), store.clone());
 
         manager.initialize().await.unwrap();
 
-        assert_eq!(store.load().unwrap().repos, vec![present_repo.clone()]);
+        assert_eq!(store.load().unwrap().folders, vec![present_folder.clone()]);
         assert_eq!(
-            repos
+            folders
                 .read()
                 .await
                 .iter()
-                .map(|repo| repo.root.clone())
+                .map(|folder| folder.root.clone())
                 .collect::<Vec<_>>(),
             vec![present_root]
         );
@@ -355,55 +367,58 @@ mod tests {
     async fn add_watch_dedupes_against_existing_config_by_resolved_path() {
         let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-watch-manager-home");
-        let repo = home.path().join("repo");
-        init_git_repo(&repo);
-        let repo_root = std::fs::canonicalize(&repo).unwrap();
+        let folder = home.path().join("folder");
+        fs::create_dir_all(&folder).unwrap();
+        let folder_root = std::fs::canonicalize(&folder).unwrap();
         let _home = ScopedEnvVar::set("HOME", home.path());
 
         let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
         store
             .save(&GongdConfig {
-                repos: vec![PathBuf::from("~/repo")],
+                folders: vec![PathBuf::from("~/folder")],
             })
             .unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
-        let mut manager = WatchManager::new(repos, raw_tx, Vec::new(), store.clone());
+        let folders = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(folders, raw_tx, Vec::new(), store.clone());
         manager.initialize().await.unwrap();
 
-        let response = manager.try_add_watch(&repo_root).unwrap();
-        let expected_message = format!("watch already configured for {}", repo_root.display());
+        let response = manager.try_add_watch(&folder_root).unwrap();
+        let expected_message = format!("watch already configured for {}", folder_root.display());
 
         assert!(response.ok);
         assert_eq!(response.message.as_deref(), Some(expected_message.as_str()));
-        assert_eq!(store.load().unwrap().repos, vec![PathBuf::from("~/repo")]);
+        assert_eq!(
+            store.load().unwrap().folders,
+            vec![PathBuf::from("~/folder")]
+        );
     }
 
     #[tokio::test]
-    async fn remove_watch_matches_configured_repo_by_resolved_path() {
+    async fn remove_watch_matches_configured_folder_by_resolved_path() {
         let _guard = env_lock().lock().await;
         let home = TestDir::new("gongd-watch-manager-remove-home");
-        let repo = home.path().join("repo");
-        init_git_repo(&repo);
+        let folder = home.path().join("folder");
+        fs::create_dir_all(&folder).unwrap();
         let _home = ScopedEnvVar::set("HOME", home.path());
 
         let store = ConfigStore::new(home.path().join(".gong").join("config.json"));
         store
             .save(&GongdConfig {
-                repos: vec![PathBuf::from("~/repo")],
+                folders: vec![PathBuf::from("~/folder")],
             })
             .unwrap();
 
         let (raw_tx, _raw_rx) = mpsc::channel(16);
-        let repos = Arc::new(RwLock::new(Vec::new()));
-        let mut manager = WatchManager::new(repos, raw_tx, Vec::new(), store.clone());
+        let folders = Arc::new(RwLock::new(Vec::new()));
+        let mut manager = WatchManager::new(folders, raw_tx, Vec::new(), store.clone());
         manager.initialize().await.unwrap();
 
-        let response = manager.try_remove_watch(&repo).unwrap();
+        let response = manager.try_remove_watch(&folder).unwrap();
 
         assert!(response.ok);
-        assert_eq!(store.load().unwrap().repos, Vec::<PathBuf>::new());
+        assert_eq!(store.load().unwrap().folders, Vec::<PathBuf>::new());
     }
 
     async fn send_watch_request(

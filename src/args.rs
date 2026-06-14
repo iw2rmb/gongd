@@ -9,7 +9,7 @@ use crate::paths::expand_path;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gongd")]
-#[command(about = "Watch local Git repositories and broadcast filtered events over a Unix socket")]
+#[command(about = "Watch local folders and broadcast events over a Unix socket")]
 pub struct Args {
     /// Unix domain socket path for the event broadcast stream.
     #[arg(long, default_value = "/tmp/gongd.sock")]
@@ -27,8 +27,8 @@ pub struct Args {
     #[arg(long, default_value_t = 150)]
     pub debounce_ms: u64,
 
-    /// Optional Git repository roots to watch immediately on startup.
-    pub repos: Vec<PathBuf>,
+    /// Optional folders to watch immediately on startup.
+    pub folders: Vec<PathBuf>,
 }
 
 impl Args {

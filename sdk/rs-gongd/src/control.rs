@@ -9,20 +9,20 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::{Client, ControlResponse, Error};
 
 impl Client {
-    pub fn add_watch(&self, repo: impl AsRef<Path>) -> Result<ControlResponse, Error> {
-        self.send_repo_control(RepoControlOp::AddWatch, repo)
+    pub fn add_watch(&self, folder: impl AsRef<Path>) -> Result<ControlResponse, Error> {
+        self.send_folder_control(FolderControlOp::AddWatch, folder)
     }
 
-    pub fn remove_watch(&self, repo: impl AsRef<Path>) -> Result<ControlResponse, Error> {
-        self.send_repo_control(RepoControlOp::RemoveWatch, repo)
+    pub fn remove_watch(&self, folder: impl AsRef<Path>) -> Result<ControlResponse, Error> {
+        self.send_folder_control(FolderControlOp::RemoveWatch, folder)
     }
 
     pub fn list_watches(&self) -> Result<Vec<String>, Error> {
         let response: ControlResponse = self.send_control(ControlRequest {
             op: "list_watches",
-            repo: None,
+            folder: None,
         })?;
-        Ok(response.repos.unwrap_or_default())
+        Ok(response.folders.unwrap_or_default())
     }
 
     fn send_control<T: Serialize>(&self, request: T) -> Result<ControlResponse, Error> {
@@ -40,14 +40,14 @@ impl Client {
         }
     }
 
-    fn send_repo_control(
+    fn send_folder_control(
         &self,
-        op: RepoControlOp,
-        repo: impl AsRef<Path>,
+        op: FolderControlOp,
+        folder: impl AsRef<Path>,
     ) -> Result<ControlResponse, Error> {
         self.send_control(ControlRequest {
             op: op.as_str(),
-            repo: Some(repo.as_ref().display().to_string()),
+            folder: Some(folder.as_ref().display().to_string()),
         })
     }
 
@@ -60,16 +60,16 @@ impl Client {
 struct ControlRequest<'a> {
     op: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    repo: Option<String>,
+    folder: Option<String>,
 }
 
 #[derive(Clone, Copy)]
-enum RepoControlOp {
+enum FolderControlOp {
     AddWatch,
     RemoveWatch,
 }
 
-impl RepoControlOp {
+impl FolderControlOp {
     fn as_str(self) -> &'static str {
         match self {
             Self::AddWatch => "add_watch",
@@ -106,24 +106,24 @@ mod tests {
             &control_socket,
             |value| {
                 assert_eq!(value["op"], "add_watch");
-                assert_eq!(value["repo"], "/tmp/repo");
+                assert_eq!(value["folder"], "/tmp/folder");
             },
             ControlResponse {
                 ok: true,
                 message: Some("watch added".to_owned()),
                 error: None,
-                repos: None,
+                folders: None,
             },
         );
 
         let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let response = client.add_watch("/tmp/repo").unwrap();
+        let response = client.add_watch("/tmp/folder").unwrap();
         assert_eq!(response.message.as_deref(), Some("watch added"));
         handle.join().unwrap();
     }
 
     #[test]
-    fn list_watches_returns_repo_list() {
+    fn list_watches_returns_folder_list() {
         let control_socket = socket_path("ctl-list");
         let _guard = SocketGuard::new(&control_socket);
         let handle = spawn_control_server(
@@ -135,13 +135,13 @@ mod tests {
                 ok: true,
                 message: None,
                 error: None,
-                repos: Some(vec!["/tmp/a".to_owned(), "/tmp/b".to_owned()]),
+                folders: Some(vec!["/tmp/a".to_owned(), "/tmp/b".to_owned()]),
             },
         );
 
         let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let repos = client.list_watches().unwrap();
-        assert_eq!(repos, vec!["/tmp/a", "/tmp/b"]);
+        let folders = client.list_watches().unwrap();
+        assert_eq!(folders, vec!["/tmp/a", "/tmp/b"]);
         handle.join().unwrap();
     }
 
@@ -156,12 +156,12 @@ mod tests {
                 ok: false,
                 message: None,
                 error: Some("watch not found".to_owned()),
-                repos: None,
+                folders: None,
             },
         );
 
         let client = Client::with_sockets("/tmp/unused.sock", &control_socket);
-        let err = client.remove_watch("/tmp/repo").unwrap_err();
+        let err = client.remove_watch("/tmp/folder").unwrap_err();
         match err {
             Error::Daemon(message) => assert_eq!(message, "watch not found"),
             other => panic!("unexpected error: {other}"),

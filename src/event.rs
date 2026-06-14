@@ -11,8 +11,8 @@ use notify::{
 use tokio::sync::Mutex;
 
 use crate::{
+    folder::MonitoredFolder,
     protocol::{EventType, WireEvent},
-    repo::RepoState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +96,7 @@ impl PendingEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DedupKey {
-    repo: PathBuf,
+    folder: PathBuf,
     event_type: EventType,
     path: Option<PathBuf>,
     git_path: Option<String>,
@@ -131,14 +131,14 @@ impl Deduper {
 }
 
 pub async fn translate_event(
-    repos: &[RepoState],
+    folders: &[MonitoredFolder],
     event: Event,
     deduper: SharedDeduper,
 ) -> Vec<WireEvent> {
     let mut out = Vec::new();
 
     for path in &event.paths {
-        if let Some(event) = translate_path_event(repos, path, event.kind, &deduper).await {
+        if let Some(event) = translate_path_event(folders, path, event.kind, &deduper).await {
             out.push(event);
         }
     }
@@ -146,9 +146,9 @@ pub async fn translate_event(
     if is_rename_event(event.kind) && event.paths.len() >= 2 {
         let from = &event.paths[0];
         let to = &event.paths[1];
-        if let Some(repo) = repo_for_paths(repos, from, to) {
-            if !repo.is_inside_git_dir(from) && !repo.is_inside_git_dir(to) {
-                if let Some(event) = emit_rename_event(repo, from, to, &deduper).await {
+        if let Some(folder) = folder_for_paths(folders, from, to) {
+            if !folder.is_inside_git_dir(from) && !folder.is_inside_git_dir(to) {
+                if let Some(event) = emit_rename_event(folder, from, to, &deduper).await {
                     out.push(event);
                 }
             }
@@ -159,33 +159,33 @@ pub async fn translate_event(
 }
 
 async fn translate_path_event(
-    repos: &[RepoState],
+    folders: &[MonitoredFolder],
     path: &Path,
     kind: EventKind,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
-    let repo = repo_for_path(repos, path)?;
-    if repo.is_inside_git_dir(path) {
-        translate_git_event(repo, path, kind, deduper).await
+    let folder = folder_for_path(folders, path)?;
+    if folder.is_inside_git_dir(path) {
+        translate_git_event(folder, path, kind, deduper).await
     } else {
-        translate_worktree_event(repo, path, kind, deduper).await
+        translate_folder_event(folder, path, kind, deduper).await
     }
 }
 
-async fn translate_worktree_event(
-    repo: &RepoState,
+async fn translate_folder_event(
+    folder: &MonitoredFolder,
     path: &Path,
     kind: EventKind,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
-    let rel = path.strip_prefix(&repo.root).ok()?;
+    let rel = path.strip_prefix(&folder.root).ok()?;
     let entry_kind = worktree_entry_kind(kind, path)?;
-    if repo.is_worktree_ignored(rel, entry_kind.is_dir()) {
+    if folder.is_worktree_ignored(rel, entry_kind.is_dir()) {
         return None;
     }
 
     emit_deduped_event(
-        repo,
+        folder,
         PendingEvent::worktree(worktree_event_type(kind, entry_kind)?, rel),
         deduper,
     )
@@ -193,17 +193,17 @@ async fn translate_worktree_event(
 }
 
 async fn emit_rename_event(
-    repo: &RepoState,
+    folder: &MonitoredFolder,
     from: &Path,
     to: &Path,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
-    let rel_from = from.strip_prefix(&repo.root).ok()?;
-    let rel_to = to.strip_prefix(&repo.root).ok()?;
+    let rel_from = from.strip_prefix(&folder.root).ok()?;
+    let rel_to = to.strip_prefix(&folder.root).ok()?;
     let entry_kind = rename_entry_kind(from, to);
 
-    if repo.is_worktree_ignored(rel_from, entry_kind.is_dir())
-        && repo.is_worktree_ignored(rel_to, entry_kind.is_dir())
+    if folder.is_worktree_ignored(rel_from, entry_kind.is_dir())
+        && folder.is_worktree_ignored(rel_to, entry_kind.is_dir())
     {
         return None;
     }
@@ -214,7 +214,7 @@ async fn emit_rename_event(
     };
 
     emit_deduped_event(
-        repo,
+        folder,
         PendingEvent::rename(event_type, rel_from, rel_to),
         deduper,
     )
@@ -222,12 +222,12 @@ async fn emit_rename_event(
 }
 
 async fn translate_git_event(
-    repo: &RepoState,
+    folder: &MonitoredFolder,
     path: &Path,
     kind: EventKind,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
-    let rel = path.strip_prefix(&repo.git_dir).ok()?;
+    let rel = path.strip_prefix(folder.git_dir()?).ok()?;
     let rel_str = rel.to_string_lossy().replace('\\', "/");
     let event_type = git_event_type(&rel_str);
 
@@ -236,7 +236,7 @@ async fn translate_git_event(
         _ => return None,
     }
 
-    emit_deduped_event(repo, PendingEvent::git(event_type, rel_str), deduper).await
+    emit_deduped_event(folder, PendingEvent::git(event_type, rel_str), deduper).await
 }
 
 fn now_ms() -> u128 {
@@ -246,14 +246,18 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
-fn repo_for_path<'a>(repos: &'a [RepoState], path: &Path) -> Option<&'a RepoState> {
-    repos.iter().find(|repo| path.starts_with(&repo.root))
+fn folder_for_path<'a>(folders: &'a [MonitoredFolder], path: &Path) -> Option<&'a MonitoredFolder> {
+    folders.iter().find(|folder| path.starts_with(&folder.root))
 }
 
-fn repo_for_paths<'a>(repos: &'a [RepoState], left: &Path, right: &Path) -> Option<&'a RepoState> {
-    repos
+fn folder_for_paths<'a>(
+    folders: &'a [MonitoredFolder],
+    left: &Path,
+    right: &Path,
+) -> Option<&'a MonitoredFolder> {
+    folders
         .iter()
-        .find(|repo| left.starts_with(&repo.root) && right.starts_with(&repo.root))
+        .find(|folder| left.starts_with(&folder.root) && right.starts_with(&folder.root))
 }
 
 fn is_rename_event(kind: EventKind) -> bool {
@@ -304,21 +308,21 @@ fn worktree_event_type(kind: EventKind, entry_kind: EntryKind) -> Option<EventTy
 
 fn git_event_type(rel_str: &str) -> EventType {
     match rel_str {
-        "HEAD" => EventType::RepoHeadChanged,
-        "index" => EventType::RepoIndexChanged,
-        "packed-refs" => EventType::RepoPackedRefsChanged,
-        value if value.starts_with("refs/") => EventType::RepoRefsChanged,
-        _ => EventType::RepoChanged,
+        "HEAD" => EventType::GitHeadChanged,
+        "index" => EventType::GitIndexChanged,
+        "packed-refs" => EventType::GitPackedRefsChanged,
+        value if value.starts_with("refs/") => EventType::GitRefsChanged,
+        _ => EventType::GitChanged,
     }
 }
 
 async fn emit_deduped_event(
-    repo: &RepoState,
+    folder: &MonitoredFolder,
     event: PendingEvent,
     deduper: &SharedDeduper,
 ) -> Option<WireEvent> {
     let key = DedupKey {
-        repo: repo.root.clone(),
+        folder: folder.root.clone(),
         event_type: event.event_type,
         path: event.dedup_path,
         git_path: event.dedup_git_path,
@@ -330,7 +334,7 @@ async fn emit_deduped_event(
     }
 
     Some(WireEvent {
-        repo: repo.root.display().to_string(),
+        folder: folder.root.display().to_string(),
         event_type: event.event_type,
         path: event.path,
         git_path: event.git_path,
@@ -343,16 +347,16 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use notify::{
-        event::{EventAttributes, ModifyKind, RemoveKind},
+        event::{CreateKind, EventAttributes, ModifyKind, RemoveKind},
         Event, EventKind,
     };
     use tokio::sync::Mutex;
 
     use super::{translate_event, Deduper, SharedDeduper};
     use crate::{
+        folder::MonitoredFolder,
         protocol::EventType,
-        repo::RepoState,
-        test_support::{init_git_repo, write_file, TestDir},
+        test_support::{init_git_folder, write_file, TestDir},
     };
 
     fn deduper() -> SharedDeduper {
@@ -362,12 +366,12 @@ mod tests {
     #[tokio::test]
     async fn ignored_directory_remove_uses_notify_folder_kind() {
         let tmp = TestDir::new("gongd-event-remove-dir");
-        init_git_repo(tmp.path());
+        init_git_folder(tmp.path());
         write_file(&tmp.path().join(".gitignore"), "ignored-dir/\n");
 
         let ignored_dir = tmp.path().join("ignored-dir");
         std::fs::create_dir_all(&ignored_dir).unwrap();
-        let repo = RepoState::discover(tmp.path()).unwrap();
+        let folder = MonitoredFolder::discover(tmp.path()).unwrap();
         std::fs::remove_dir_all(&ignored_dir).unwrap();
 
         let event = Event {
@@ -376,20 +380,43 @@ mod tests {
             attrs: EventAttributes::default(),
         };
 
-        let translated = translate_event(&[repo], event, deduper()).await;
+        let translated = translate_event(&[folder], event, deduper()).await;
 
         assert!(translated.is_empty());
     }
 
     #[tokio::test]
+    async fn plain_folder_emits_file_event_without_gitignore_filtering() {
+        let tmp = TestDir::new("gongd-event-plain-folder");
+        write_file(&tmp.path().join(".gitignore"), "ignored.txt\n");
+        write_file(&tmp.path().join("ignored.txt"), "");
+        let path = std::fs::canonicalize(tmp.path().join("ignored.txt")).unwrap();
+        let folder = MonitoredFolder::discover(tmp.path()).unwrap();
+
+        let event = Event {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![path],
+            attrs: EventAttributes::default(),
+        };
+
+        let translated = translate_event(&[folder], event, deduper()).await;
+
+        assert_eq!(
+            translated.iter().map(|e| e.event_type).collect::<Vec<_>>(),
+            vec![EventType::FileCreated],
+        );
+        assert_eq!(translated[0].path.as_deref(), Some("ignored.txt"));
+    }
+
+    #[tokio::test]
     async fn directory_modify_emits_dir_modified() {
         let tmp = TestDir::new("gongd-event-modify-dir");
-        init_git_repo(tmp.path());
+        init_git_folder(tmp.path());
 
         let dir = tmp.path().join("tracked-dir");
         std::fs::create_dir_all(&dir).unwrap();
         let dir = std::fs::canonicalize(&dir).unwrap();
-        let repo = RepoState::discover(tmp.path()).unwrap();
+        let folder = MonitoredFolder::discover(tmp.path()).unwrap();
 
         let event = Event {
             kind: EventKind::Modify(ModifyKind::Metadata(notify::event::MetadataKind::Any)),
@@ -397,11 +424,33 @@ mod tests {
             attrs: EventAttributes::default(),
         };
 
-        let translated = translate_event(&[repo], event, deduper()).await;
+        let translated = translate_event(&[folder], event, deduper()).await;
 
         assert_eq!(
             translated.iter().map(|e| e.event_type).collect::<Vec<_>>(),
             vec![EventType::DirModified],
         );
+    }
+
+    #[tokio::test]
+    async fn git_metadata_event_uses_git_event_type() {
+        let tmp = TestDir::new("gongd-event-git-head");
+        init_git_folder(tmp.path());
+        let folder = MonitoredFolder::discover(tmp.path()).unwrap();
+        let head = std::fs::canonicalize(tmp.path().join(".git").join("HEAD")).unwrap();
+
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![head],
+            attrs: EventAttributes::default(),
+        };
+
+        let translated = translate_event(&[folder], event, deduper()).await;
+
+        assert_eq!(
+            translated.iter().map(|e| e.event_type).collect::<Vec<_>>(),
+            vec![EventType::GitHeadChanged],
+        );
+        assert_eq!(translated[0].git_path.as_deref(), Some("HEAD"));
     }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct WireEvent {
-    pub repo: String,
+    pub folder: String,
     #[serde(rename = "type")]
     pub event_type: EventType,
     pub path: Option<String>,
@@ -24,18 +24,18 @@ pub enum EventType {
     DirModified,
     DirDeleted,
     DirRenamed,
-    RepoHeadChanged,
-    RepoIndexChanged,
-    RepoRefsChanged,
-    RepoPackedRefsChanged,
-    RepoChanged,
+    GitHeadChanged,
+    GitIndexChanged,
+    GitRefsChanged,
+    GitPackedRefsChanged,
+    GitChanged,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ControlRequest {
-    AddWatch { repo: PathBuf },
-    RemoveWatch { repo: PathBuf },
+    AddWatch { folder: PathBuf },
+    RemoveWatch { folder: PathBuf },
     ListWatches,
 }
 
@@ -47,7 +47,7 @@ pub struct ControlResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repos: Option<Vec<String>>,
+    pub folders: Option<Vec<String>>,
 }
 
 impl ControlResponse {
@@ -56,7 +56,7 @@ impl ControlResponse {
             ok,
             message: None,
             error: None,
-            repos: None,
+            folders: None,
         }
     }
 
@@ -67,12 +67,12 @@ impl ControlResponse {
         }
     }
 
-    pub fn list(repos: Vec<PathBuf>) -> Self {
+    pub fn list(folders: Vec<PathBuf>) -> Self {
         Self {
-            repos: Some(
-                repos
+            folders: Some(
+                folders
                     .into_iter()
-                    .map(|repo| repo.display().to_string())
+                    .map(|folder| folder.display().to_string())
                     .collect(),
             ),
             ..Self::new(true)

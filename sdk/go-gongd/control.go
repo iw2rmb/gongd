@@ -8,17 +8,17 @@ import (
 	"fmt"
 )
 
-func (c *Client) AddWatch(ctx context.Context, repo string) (*ControlResponse, error) {
+func (c *Client) AddWatch(ctx context.Context, folder string) (*ControlResponse, error) {
 	return c.doControl(ctx, addWatchRequest{
-		Op:   "add_watch",
-		Repo: repo,
+		Op:     "add_watch",
+		Folder: folder,
 	})
 }
 
-func (c *Client) RemoveWatch(ctx context.Context, repo string) (*ControlResponse, error) {
+func (c *Client) RemoveWatch(ctx context.Context, folder string) (*ControlResponse, error) {
 	return c.doControl(ctx, removeWatchRequest{
-		Op:   "remove_watch",
-		Repo: repo,
+		Op:     "remove_watch",
+		Folder: folder,
 	})
 }
 
@@ -27,17 +27,17 @@ func (c *Client) ListWatches(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return response.Repos, nil
+	return response.Folders, nil
 }
 
 type addWatchRequest struct {
-	Op   string `json:"op"`
-	Repo string `json:"repo"`
+	Op     string `json:"op"`
+	Folder string `json:"folder"`
 }
 
 type removeWatchRequest struct {
-	Op   string `json:"op"`
-	Repo string `json:"repo"`
+	Op     string `json:"op"`
+	Folder string `json:"folder"`
 }
 
 type listWatchesRequest struct {

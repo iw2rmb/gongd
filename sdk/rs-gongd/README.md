@@ -2,7 +2,7 @@
 
 `rs-gongd` is a small Rust SDK for `gongd`.
 
-Current release: `v0.1.0`.
+Current release: `v0.1.1`.
 
 It wraps the two daemon sockets:
 
@@ -28,11 +28,11 @@ use rs_gongd::Client;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
 
-    client.add_watch("/absolute/path/to/repo")?;
+    client.add_watch("/absolute/path/to/folder")?;
 
     let mut stream = client.subscribe()?;
     while let Some(event) = stream.next_event()? {
-        println!("{:?} {} {:?} {:?}", event.event_type, event.repo, event.path, event.git_path);
+        println!("{:?} {} {:?} {:?}", event.event_type, event.folder, event.path, event.git_path);
     }
 
     Ok(())

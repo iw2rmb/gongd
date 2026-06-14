@@ -128,23 +128,23 @@ mod tests {
         let _workspace = ScopedEnvVar::set("WORKSPACE", workspace.path());
 
         assert_eq!(
-            expand_path(Path::new("~/repo")).unwrap(),
-            home.path().join("repo")
+            expand_path(Path::new("~/folder")).unwrap(),
+            home.path().join("folder")
         );
         assert_eq!(
-            expand_path(Path::new("$WORKSPACE/repo")).unwrap(),
-            workspace.path().join("repo")
+            expand_path(Path::new("$WORKSPACE/folder")).unwrap(),
+            workspace.path().join("folder")
         );
         assert_eq!(
-            expand_path(Path::new("${WORKSPACE}/repo")).unwrap(),
-            workspace.path().join("repo")
+            expand_path(Path::new("${WORKSPACE}/folder")).unwrap(),
+            workspace.path().join("folder")
         );
     }
 
     #[test]
     fn expand_path_errors_for_unset_env_vars() {
         let _guard = env_lock().blocking_lock();
-        let err = expand_path(Path::new("$GONGD_TEST_UNSET/repo")).unwrap_err();
+        let err = expand_path(Path::new("$GONGD_TEST_UNSET/folder")).unwrap_err();
 
         assert_eq!(err.kind(), ErrorKind::NotFound);
     }
