@@ -226,7 +226,7 @@ fn start_folder_watcher(
 ) -> NotifyResult<RecommendedWatcher> {
     let mut watcher = RecommendedWatcher::new(
         move |event| {
-            let _ = tx.blocking_send(event);
+            let _ = tx.try_send(event);
         },
         Config::default(),
     )?;

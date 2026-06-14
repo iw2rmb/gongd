@@ -41,6 +41,7 @@ Git metadata changes:
 - `.git` must be a directory to enable Git mode. Folders where `.git` is a file are watched as plain folders.
 - The ignore matcher is built when Git mode is discovered. If ignore files change while the daemon is running, restart or re-add the folder.
 - Rename reporting depends on the backend watcher and platform behavior.
+- Raw filesystem event delivery is documented in [docs/events.md](docs/events.md).
 
 
 ## Install
