@@ -40,12 +40,25 @@ type Event struct {
 	TSUnixMS uint64    `json:"ts_unix_ms"`
 }
 
+type Reconnect struct{}
+
 func (c *Client) Subscribe(ctx context.Context) (<-chan Event, <-chan error) {
+	events, _, errs := c.subscribe(ctx, false)
+	return events, errs
+}
+
+func (c *Client) SubscribeWithReconnects(ctx context.Context) (<-chan Event, <-chan Reconnect, <-chan error) {
+	return c.subscribe(ctx, true)
+}
+
+func (c *Client) subscribe(ctx context.Context, notifyReconnects bool) (<-chan Event, <-chan Reconnect, <-chan error) {
 	events := make(chan Event)
+	reconnects := make(chan Reconnect, 1)
 	errs := make(chan error, 1)
 
 	go func() {
 		defer close(events)
+		defer close(reconnects)
 		defer close(errs)
 
 		conn, err := c.dial(ctx, c.EventSocket)
@@ -75,10 +88,13 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan Event, <-chan error) {
 			if conn == nil {
 				return
 			}
+			if notifyReconnects {
+				sendReconnect(reconnects)
+			}
 		}
 	}()
 
-	return events, errs
+	return events, reconnects, errs
 }
 
 func (c *Client) readEventStream(ctx context.Context, conn net.Conn, events chan<- Event) (bool, error) {
@@ -139,5 +155,12 @@ func (c *Client) redialEventStream(ctx context.Context) (net.Conn, error) {
 			return nil, nil
 		case <-timer.C:
 		}
+	}
+}
+
+func sendReconnect(reconnects chan<- Reconnect) {
+	select {
+	case reconnects <- Reconnect{}:
+	default:
 	}
 }

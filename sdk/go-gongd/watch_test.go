@@ -53,12 +53,17 @@ func TestSubscribeReconnectsAfterServiceReload(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	events, errs := client.Subscribe(ctx)
+	events, reconnects, errs := client.SubscribeWithReconnects(ctx)
 	first := <-events
 	select {
 	case <-ready:
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for socket reload")
+	}
+	select {
+	case <-reconnects:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for reconnect notification")
 	}
 	second := <-events
 
