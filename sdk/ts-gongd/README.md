@@ -35,3 +35,15 @@ for await (const event of client.subscribe({ signal: abort.signal })) {
   console.log(event.type, event.folder, event.path, event.git_path);
 }
 ```
+
+To observe reconnects:
+
+```ts
+for await (const item of client.subscribeWithReconnects({ signal: abort.signal })) {
+  if (item.kind === "reconnect") {
+    console.log("reconnected");
+  } else {
+    console.log(item.event.type, item.event.folder);
+  }
+}
+```

@@ -27,6 +27,14 @@ export interface Event {
   ts_unix_ms: number;
 }
 
+export interface Reconnect {
+  kind: "reconnect";
+}
+
+export type SubscriptionItem =
+  | { kind: "event"; event: Event }
+  | Reconnect;
+
 export interface ControlResponse {
   ok: boolean;
   message?: string;
@@ -85,6 +93,16 @@ export class Client {
   }
 
   async *subscribe(options: SubscribeOptions = {}): AsyncGenerator<Event> {
+    for await (const item of this.subscribeWithReconnects(options)) {
+      if (item.kind === "event") {
+        yield item.event;
+      }
+    }
+  }
+
+  async *subscribeWithReconnects(
+    options: SubscribeOptions = {}
+  ): AsyncGenerator<SubscriptionItem> {
     const { signal } = options;
     let socket = await connectSocket(this.eventSocket, signal);
 
@@ -98,7 +116,7 @@ export class Client {
             continue;
           }
 
-          yield JSON.parse(trimmed) as Event;
+          yield { kind: "event", event: JSON.parse(trimmed) as Event };
         }
       } catch (error) {
         if (signal?.aborted) {
@@ -113,6 +131,7 @@ export class Client {
       }
 
       socket = await reconnectSocket(this.eventSocket, signal);
+      yield { kind: "reconnect" };
     }
   }
 

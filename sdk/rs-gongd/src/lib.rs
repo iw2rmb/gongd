@@ -5,6 +5,8 @@ use std::{fmt, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub use watch::{Reconnect, ReconnectEventStream, SubscriptionItem};
+
 pub const DEFAULT_EVENT_SOCKET: &str = "/tmp/gongd.sock";
 pub const DEFAULT_CONTROL_SOCKET: &str = "/tmp/gongd.ctl.sock";
 pub const VERSION: &str = "v0.1.1";

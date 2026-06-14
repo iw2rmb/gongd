@@ -14,8 +14,14 @@ const RECONNECT_DELAY: Duration = Duration::from_millis(100);
 
 impl Client {
     pub fn subscribe(&self) -> Result<EventStream, Error> {
-        let stream = self.connect_event()?;
         Ok(EventStream {
+            inner: self.subscribe_with_reconnects()?,
+        })
+    }
+
+    pub fn subscribe_with_reconnects(&self) -> Result<ReconnectEventStream, Error> {
+        let stream = self.connect_event()?;
+        Ok(ReconnectEventStream {
             socket_path: self.event_socket.clone(),
             reader: BufReader::new(stream),
             line_buf: String::new(),
@@ -27,7 +33,20 @@ impl Client {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reconnect;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubscriptionItem {
+    Event(Event),
+    Reconnect(Reconnect),
+}
+
 pub struct EventStream {
+    inner: ReconnectEventStream,
+}
+
+pub struct ReconnectEventStream {
     socket_path: PathBuf,
     reader: BufReader<UnixStream>,
     line_buf: String,
@@ -36,11 +55,28 @@ pub struct EventStream {
 impl EventStream {
     pub fn next_event(&mut self) -> Result<Option<Event>, Error> {
         loop {
-            match read_optional_json_line(&mut self.reader, &mut self.line_buf) {
-                Ok(Some(event)) => return Ok(Some(event)),
-                Ok(None) => self.reader = reconnect_event_reader(&self.socket_path)?,
+            match self.inner.next_item()? {
+                Some(SubscriptionItem::Event(event)) => return Ok(Some(event)),
+                Some(SubscriptionItem::Reconnect(_)) => {}
+                None => return Ok(None),
+            }
+        }
+    }
+}
+
+impl ReconnectEventStream {
+    pub fn next_item(&mut self) -> Result<Option<SubscriptionItem>, Error> {
+        loop {
+            match read_json_line(&mut self.reader, &mut self.line_buf) {
+                Ok(JsonLine::Item(event)) => return Ok(Some(SubscriptionItem::Event(event))),
+                Ok(JsonLine::Empty) => {}
+                Ok(JsonLine::Eof) => {
+                    self.reader = reconnect_event_reader(&self.socket_path)?;
+                    return Ok(Some(SubscriptionItem::Reconnect(Reconnect)));
+                }
                 Err(Error::Io(err)) if is_reconnectable_io_error(&err) => {
                     self.reader = reconnect_event_reader(&self.socket_path)?;
+                    return Ok(Some(SubscriptionItem::Reconnect(Reconnect)));
                 }
                 Err(err) => return Err(err),
             }
@@ -48,22 +84,28 @@ impl EventStream {
     }
 }
 
-fn read_optional_json_line<T: DeserializeOwned>(
+enum JsonLine<T> {
+    Item(T),
+    Empty,
+    Eof,
+}
+
+fn read_json_line<T: DeserializeOwned>(
     reader: &mut impl BufRead,
     line_buf: &mut String,
-) -> Result<Option<T>, Error> {
+) -> Result<JsonLine<T>, Error> {
     line_buf.clear();
     let read = reader.read_line(line_buf)?;
     if read == 0 {
-        return Ok(None);
+        return Ok(JsonLine::Eof);
     }
 
     let line = line_buf.trim();
     if line.is_empty() {
-        return Ok(None);
+        return Ok(JsonLine::Empty);
     }
 
-    Ok(Some(serde_json::from_str(line)?))
+    Ok(JsonLine::Item(serde_json::from_str(line)?))
 }
 
 fn reconnect_event_reader(socket_path: &Path) -> Result<BufReader<UnixStream>, Error> {
@@ -94,7 +136,7 @@ mod tests {
 
     use crate::{
         test_support::{socket_path, SocketGuard},
-        Client, EventType,
+        Client, EventType, SubscriptionItem,
     };
 
     #[test]
@@ -123,14 +165,23 @@ mod tests {
         });
 
         let client = Client::with_sockets(&event_socket, "/tmp/unused.sock");
-        let mut stream = client.subscribe().unwrap();
+        let mut stream = client.subscribe_with_reconnects().unwrap();
 
-        let first = stream.next_event().unwrap().unwrap();
+        let first = stream.next_item().unwrap().unwrap();
+        let SubscriptionItem::Event(first) = first else {
+            panic!("expected first event");
+        };
         assert_eq!(first.event_type, EventType::FileModified);
         assert_eq!(first.path.as_deref(), Some("main.go"));
 
         ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let second = stream.next_event().unwrap().unwrap();
+        let reconnect = stream.next_item().unwrap().unwrap();
+        assert!(matches!(reconnect, SubscriptionItem::Reconnect(_)));
+
+        let second = stream.next_item().unwrap().unwrap();
+        let SubscriptionItem::Event(second) = second else {
+            panic!("expected second event");
+        };
         assert_eq!(second.event_type, EventType::GitHeadChanged);
         assert_eq!(second.git_path.as_deref(), Some("HEAD"));
         handle.join().unwrap();

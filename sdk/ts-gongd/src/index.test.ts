@@ -118,24 +118,39 @@ test("subscribe reconnects after stream EOF", async () => {
 
   try {
     const client = new Client({ eventSocket: socketPath });
-    const subscription = client.subscribe();
+    const subscription = client.subscribeWithReconnects();
 
     const first = await subscription.next();
     assert.equal(first.done, false);
     if (first.done) {
+      throw new Error("expected first item");
+    }
+    assert.equal(first.value.kind, "event");
+    if (first.value.kind !== "event") {
       throw new Error("expected first event");
     }
-    assert.equal(first.value.type, "file_modified");
-    assert.equal(first.value.path, "main.go");
+    assert.equal(first.value.event.type, "file_modified");
+    assert.equal(first.value.event.path, "main.go");
 
     await reloaded.promise;
+    const reconnect = await subscription.next();
+    assert.equal(reconnect.done, false);
+    if (reconnect.done) {
+      throw new Error("expected reconnect item");
+    }
+    assert.equal(reconnect.value.kind, "reconnect");
+
     const second = await subscription.next();
     assert.equal(second.done, false);
     if (second.done) {
+      throw new Error("expected second item");
+    }
+    assert.equal(second.value.kind, "event");
+    if (second.value.kind !== "event") {
       throw new Error("expected second event");
     }
-    assert.equal(second.value.type, "git_head_changed");
-    assert.equal(second.value.git_path, "HEAD");
+    assert.equal(second.value.event.type, "git_head_changed");
+    assert.equal(second.value.event.git_path, "HEAD");
 
     await subscription.return(undefined);
     await serving;

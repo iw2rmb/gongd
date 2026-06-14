@@ -38,3 +38,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+To observe reconnects:
+
+```rust
+use rs_gongd::{Client, SubscriptionItem};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new();
+    let mut stream = client.subscribe_with_reconnects()?;
+
+    loop {
+        match stream.next_item()? {
+            Some(SubscriptionItem::Event(event)) => println!("{:?}", event.event_type),
+            Some(SubscriptionItem::Reconnect(_)) => println!("reconnected"),
+            None => break,
+        }
+    }
+
+    Ok(())
+}
+```
