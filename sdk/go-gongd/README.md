@@ -2,7 +2,7 @@
 
 `go-gongd` is a small Go SDK for `gongd`.
 
-Current release: `v0.1.3`.
+Current release: `v0.1.4`.
 
 It wraps the two daemon sockets:
 
@@ -20,6 +20,12 @@ cd sdk/go-gongd
 go test ./...
 ```
 
+From another Go module:
+
+```bash
+go get github.com/iw2rmb/gongd/sdk/go-gongd@v0.1.4
+```
+
 ## Usage
 
 ```go
@@ -29,7 +35,7 @@ import (
 	"context"
 	"fmt"
 
-	gongd "go-gongd"
+	gongd "github.com/iw2rmb/gongd/sdk/go-gongd"
 )
 
 func main() {
